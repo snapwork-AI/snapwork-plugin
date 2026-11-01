@@ -37,13 +37,15 @@ auto_update_say() {
 }
 
 # A python3 that will run. On macOS /usr/bin/python3 is a stub that opens an "install developer
-# tools" window when the tools are missing: a hook must never do that. On Windows python3 may be
-# the Microsoft Store's stand-in, which only prints how to install Python: run it to know.
+# tools" window when the tools are missing: a hook must never run it then. Any other python3 may
+# be a stand-in too (on Windows, the Microsoft Store's, which only prints how to install Python):
+# run it to know.
 python_ok() {
   command -v python3 > /dev/null 2>&1 || return 1
-  [ "$(uname -s 2> /dev/null)" = Darwin ] || { python3 -c '' > /dev/null 2>&1 < /dev/null; return; }
-  [ "$(command -v python3)" != /usr/bin/python3 ] && return 0
-  xcode-select -p > /dev/null 2>&1
+  if [ "$(uname -s 2> /dev/null)" = Darwin ] && [ "$(command -v python3)" = /usr/bin/python3 ]; then
+    xcode-select -p > /dev/null 2>&1 || return 1
+  fi
+  python3 -c '' > /dev/null 2>&1 < /dev/null
 }
 
 auto_update() {

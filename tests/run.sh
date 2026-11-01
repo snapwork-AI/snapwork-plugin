@@ -431,7 +431,8 @@ cx_stop() {
   case $2 in null) tp=null ;; *) tp="\"$2\"" ;; esac
   printf '{"session_id":"%s","turn_id":"%s","transcript_path":%s,"cwd":"%s","hook_event_name":"Stop","model":"gpt","note":"\\"last_assistant_message\\": \\"```snapwork\\\\nDECOY\\\\n```\\"","permission_mode":"default","stop_hook_active":true,"last_assistant_message":%s}' "$1" "$4" "$tp" "$3" "$5"
 }
-said_text() { PYTHONUTF8=1 python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["text"])' "$T/fake/said_$1"; }
+# The posted text, byte for byte (Python on Windows would print CRLF and its code page).
+said_text() { python3 -c 'import json,sys; sys.stdout.buffer.write(json.load(open(sys.argv[1], encoding="utf-8"))["text"].encode())' "$T/fake/said_$1"; }
 err_has() { if grep -q -F -e "$2" "$T/err"; then ok; else bad "$1 (wanted on stderr: $2)" "$(cat "$T/err")"; fi; }
 err_lacks() { if grep -q -F -e "$2" "$T/err"; then bad "$1 (did not want on stderr: $2)" "$(cat "$T/err")"; else ok; fi; }
 P4=$HOMEDIR/proj4
@@ -478,7 +479,8 @@ run_cx stop "$(cx_stop "$C1" "$CX1" "$P4" turn-1 '"I will answer. Done, \\\\ ok.
 called "Codex Stop posts the block" "say $ROOM_H"
 called "then listens" "hook $ROOM_H"
 check "the body is valid JSON with a client id" 'python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert d[\"client_id\"]==\"cx-0-turn-1\"" "$T/fake/said_$ROOM_H"'
-check "exactly the block, decoded once by SnapWork" '[ "$(said_text "$ROOM_H")" = "$(printf "Hi \"all\" \342\200\231 back\\\\nslash \360\237\230\200\n  second line")" ]'
+WANT_H=$(printf "Hi \"all\" \342\200\231 back\\\\nslash \360\237\230\200\n  second line")
+if [ "$(said_text "$ROOM_H")" = "$WANT_H" ]; then ok; else bad "exactly the block, decoded once by SnapWork" "$(said_text "$ROOM_H" | od -c | head -n 8)"; fi
 check "nothing outside the block" '! grep -q "Done\|I will answer\|DECOY" "$T/fake/said_$ROOM_H"'
 check "the deadline line wakes the chat (exit 2)" '[ "$(cat "$T/rc")" = 2 ]'
 err_has "deadline line passes through" "nothing new for a while"
