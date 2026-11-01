@@ -45,6 +45,11 @@ ADD1=adadadad-0000-4000-8000-000000000001
 FORK_ID=fee53b8c-6a51-45d3-8d48-980b9689f68a
 TAB=$(printf '\t')
 
+# Windows (Git Bash, where Claude Code runs hooks there) has no Unix file modes, and ln -s copies
+# instead of linking: those checks are skipped there and counted.
+case $(uname -s 2> /dev/null) in MINGW* | MSYS* | CYGWIN*) WINDOWS=1 ;; *) WINDOWS=0 ;; esac
+SKIPPED=0
+unix() { [ "$WINDOWS" -eq 0 ] || { SKIPPED=$((SKIPPED + 1)); return 1; }; }
 PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); }
@@ -98,10 +103,11 @@ has "connected line" "connected. This chat is now the home of \"Claude\""
 has "the person is told how to add it" "add \"Claude\" to any room you are in"
 called "connect call" "connect kfr-cccc-0001"
 check "the plugin names its app and the chat" 'grep -q "\"home_session\":\"$S1\",\"runtime\":\"claude-code\",\"folder\":\"proj\"" "$T/fake/connect_body"'
-check "computer key saved, mode 600" '[ "$(ls -l "$SW/computer.json" | cut -c 1-10)" = "-rw-------" ] && grep -q "swc_testcomputerkey123" "$SW/computer.json"'
+unix && check "computer key mode 600" '[ "$(ls -l "$SW/computer.json" | cut -c 1-10)" = "-rw-------" ]'
+check "computer key saved" 'grep -q "swc_testcomputerkey123" "$SW/computer.json"'
 check "home saved with its folder, command and PATH" 'grep -q "\"project\": \"$P1\"" "$SW/homes/$S1.json" && grep -q "\"runner\": \"$T/bin/claude\"" "$SW/homes/$S1.json" && grep -q "\"path\": \"$T/bin:" "$SW/homes/$S1.json"'
-check "home file mode 600" '[ "$(ls -l "$SW/homes/$S1.json" | cut -c 1-10)" = "-rw-------" ]'
-check "watcher copied, owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
+unix && check "home file mode 600" '[ "$(ls -l "$SW/homes/$S1.json" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "watcher copied, owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
 check "home file is valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SW/homes/$S1.json"'
 check "computer file is valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SW/computer.json"'
 
@@ -232,12 +238,14 @@ kill "$holder" 2> /dev/null
 called "a lock held by something that is not a watcher is taken over" "work"
 reset
 cp "$SW/snapwork-watch.sh" "$T/snapwork-watch.sh"
-env HOME="$HOMEDIR" SNAPWORK_HOME="$T/other" sh -c 'sleep 30' snapwork-watch.sh &
-holder=$!
-printf '%s' "$holder" > "$SW/watch.lock"
-watch
-kill "$holder" 2> /dev/null
-not_called "a live watcher keeps its lock" "work"
+if unix; then
+  env HOME="$HOMEDIR" SNAPWORK_HOME="$T/other" sh -c 'sleep 30; :' snapwork-watch.sh &
+  holder=$!
+  printf '%s' "$holder" > "$SW/watch.lock"
+  watch
+  kill "$holder" 2> /dev/null
+  not_called "a live watcher keeps its lock" "work"
+fi
 rm -f "$SW/watch.lock"
 
 echo "== 10. a join by invitation on a connected computer makes the agent the person's (7.6)"
@@ -258,7 +266,7 @@ check "the claim names the folder's home id, the folder and the app" 'grep -q "\
 check "the claim carries the agent's key, in the body" 'grep -q "\"agent_key\":\"testkey" "$T/fake/claim_bodies"'
 not_called "no key on the command line" "KEY-IN-ARGV"
 check "the computer key went through curl's config" 'grep -q "Bearer swc_testcomputerkey123" "$T/fake/stdin_last"'
-check "the folder home is saved, owner only" '[ "$(ls -l "$SW/homes/$HID2.json" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "the folder home is saved, owner only" '[ "$(ls -l "$SW/homes/$HID2.json" | cut -c 1-10)" = "-rw-------" ]'
 check "it is a folder home with its full path" 'grep -q "\"kind\": \"folder\"" "$SW/homes/$HID2.json" && grep -q "\"project\": \"$P2\"" "$SW/homes/$HID2.json" && grep -q "\"home\": \"$HID2\"" "$SW/homes/$HID2.json"'
 check "a folder home has no session (an old watcher finds no chat)" '! grep -q "\"session\"" "$SW/homes/$HID2.json"'
 check "the folder home is valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$SW/homes/$HID2.json"'
@@ -272,7 +280,7 @@ SA2=a2a2a2a2-aaaa-4000-8000-0000000000a2
 printf 'kfr-aaaa-00a2|aaaaaaaa-0000-4000-8000-0000000000a2|Space A2\n' >> "$T/fake/spaces"
 run prompt "$(prompt "$SA2" "$(transcript "$SA2")" "$P2" "${INVITE}kfr-aaaa-00a2")"
 check "the watcher copy is the plugin's again" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
-check "and stays owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
+unix && check "and stays owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
 
 echo "== 10b. another chat in the same folder: the same home id"
 reset
@@ -384,7 +392,7 @@ check "the watcher says it is 0.3.2" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-wa
 check "the connect script and the watcher name the same version" '[ "$(sed -n "s/^WATCH_VERSION=//p" "$SCRIPTS/snapwork-connect.sh")" = "$(sed -n "s/^VERSION=//p" "$SCRIPTS/snapwork-watch.sh")" ]'
 
 echo "== 9. logs keep no keys, codes or invitations"
-check "watch log mode 600" '[ "$(ls -l "$SW/watch.log" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "watch log mode 600" '[ "$(ls -l "$SW/watch.log" | cut -c 1-10)" = "-rw-------" ]'
 check "watch log: no key" '! grep -q "swc_" "$SW/watch.log"'
 check "watch log: no invitation" '! grep -q "kfr-" "$SW/watch.log"'
 check "plugin log: no connect code" '! grep -q "kfr-cccc" "$SW/plugin.log"'
@@ -393,4 +401,5 @@ check "plugin log: no agent key" '! grep -q "testkey" "$SW/plugin.log"'
 check "watch log: no agent key" '! grep -q "testkey" "$SW/watch.log"'
 
 printf '\nmy agents: %s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$SKIPPED" -eq 0 ] || printf 'my agents: %s skipped on Windows (file modes, ps)\n' "$SKIPPED"
 [ "$FAIL" -eq 0 ]

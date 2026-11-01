@@ -37,6 +37,11 @@ kfr-gggg-0001|$ROOM_G|Room G
 EOF
 : > "$T/fake/calls"
 
+# Windows (Git Bash, where Claude Code runs hooks there) has no Unix file modes, and ln -s copies
+# instead of linking: those checks are skipped there and counted.
+case $(uname -s 2> /dev/null) in MINGW* | MSYS* | CYGWIN*) WINDOWS=1 ;; *) WINDOWS=0 ;; esac
+SKIPPED=0
+unix() { [ "$WINDOWS" -eq 0 ] || { SKIPPED=$((SKIPPED + 1)); return 1; }; }
 PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); }
@@ -99,7 +104,7 @@ called "join call" "join kfr-aaaa-0001"
 ST_A=$(state_of "$ROOM_A")
 check "state for A saved" '[ -n "$ST_A" ]'
 check "state belongs to the chat" '[ "$(session_in "$ST_A")" = "$S1" ]'
-check "state mode 600" '[ "$(ls -l "$ST_A" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "state mode 600" '[ "$(ls -l "$ST_A" | cut -c 1-10)" = "-rw-------" ]'
 check "state keeps punctuation in the name" 'grep -q -F "\"spaceName\": \"spike-A, Mr. O'"'"'Neil (throwaway)\"" "$ST_A"'
 check "state is valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$ST_A"'
 
@@ -185,7 +190,7 @@ called "and listens for it" "hook $ROOM_L"
 check "listener woke with exit 2 (deadline line)" '[ "$(cat "$T/rc")" = 2 ]'
 check "adopted state still valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$ST_L"'
 check "adopted state keeps its key" 'grep -q "\"key\": \"legacykey\"" "$ST_L"'
-check "adopted state mode 600" '[ "$(ls -l "$ST_L" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "adopted state mode 600" '[ "$(ls -l "$ST_L" | cut -c 1-10)" = "-rw-------" ]'
 
 echo "== 7. a new chat (not a copy) in a folder whose other chat is in a space"
 TX8=$(transcript "$S8")
@@ -239,9 +244,11 @@ TX10=$(transcript "$S10")
 reset_calls
 run prompt "$(prompt "$S10" "$TX10" "$HOMEDIR" "${LINK}kfr-cccc-0001")"
 has "home folder refused" "open a project folder first"
-ln -s "$HOMEDIR" "$T/homelink"
-printf '%s' "$(prompt "$S10" "$TX10" "$HOMEDIR" "${LINK}kfr-cccc-0001")" | env HOME="$T/homelink" CLAUDE_CONFIG_DIR= CLAUDE_CODE_PLUGIN_CACHE_DIR= SNAPWORK_HOME="$SW" PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" ${TEST_SH:-sh} "$PLUGIN" prompt > "$T/out" 2> /dev/null
-has "home folder refused when HOME is a symlink" "open a project folder first"
+if unix; then
+  ln -s "$HOMEDIR" "$T/homelink"
+  printf '%s' "$(prompt "$S10" "$TX10" "$HOMEDIR" "${LINK}kfr-cccc-0001")" | env HOME="$T/homelink" CLAUDE_CONFIG_DIR= CLAUDE_CODE_PLUGIN_CACHE_DIR= SNAPWORK_HOME="$SW" PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" ${TEST_SH:-sh} "$PLUGIN" prompt > "$T/out" 2> /dev/null
+  has "home folder refused when HOME is a symlink" "open a project folder first"
+fi
 not_called "no join from home" "join kfr-cccc-0001"
 
 echo "== 11. a link inside other text never joins"
@@ -424,7 +431,7 @@ cx_stop() {
   case $2 in null) tp=null ;; *) tp="\"$2\"" ;; esac
   printf '{"session_id":"%s","turn_id":"%s","transcript_path":%s,"cwd":"%s","hook_event_name":"Stop","model":"gpt","note":"\\"last_assistant_message\\": \\"```snapwork\\\\nDECOY\\\\n```\\"","permission_mode":"default","stop_hook_active":true,"last_assistant_message":%s}' "$1" "$4" "$tp" "$3" "$5"
 }
-said_text() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["text"])' "$T/fake/said_$1"; }
+said_text() { PYTHONUTF8=1 python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["text"])' "$T/fake/said_$1"; }
 err_has() { if grep -q -F -e "$2" "$T/err"; then ok; else bad "$1 (wanted on stderr: $2)" "$(cat "$T/err")"; fi; }
 err_lacks() { if grep -q -F -e "$2" "$T/err"; then bad "$1 (did not want on stderr: $2)" "$(cat "$T/err")"; else ok; fi; }
 P4=$HOMEDIR/proj4
@@ -820,12 +827,12 @@ has "and how to turn it off" "To turn this off: /plugin, then Marketplaces, then
 check "the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
 check "settings: only autoUpdate true was added to the snapwork entry" 'turned_on "$CL/settings.json" "$T/settings.orig" settings'
 check "settings: text outside ASCII kept as is" 'grep -q -F "\"note\": \"$CAFE\"" "$CL/settings.json"'
-check "settings: mode kept (640)" '[ "$(ls -l "$CL/settings.json" | cut -c 1-10)" = "-rw-r-----" ]'
+unix && check "settings: mode kept (640)" '[ "$(ls -l "$CL/settings.json" | cut -c 1-10)" = "-rw-r-----" ]'
 check "settings: backup holds the original bytes" 'cmp -s "$CL/settings.json.snapwork-bak" "$T/settings.orig"'
-check "settings: backup mode 600" '[ "$(ls -l "$CL/settings.json.snapwork-bak" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "settings: backup mode 600" '[ "$(ls -l "$CL/settings.json.snapwork-bak" | cut -c 1-10)" = "-rw-------" ]'
 check "known_marketplaces.json untouched when settings has the entry" 'cmp -s "$KM" "$T/known.orig"'
 check "no temp files left" '[ -z "$(ls -A "$CL" | grep "^\.snapwork")" ]'
-check "marker written, mode 600" '[ "$(ls -l "$MARK" | cut -c 1-10)" = "-rw-------" ] && grep -q "^on settings " "$MARK"'
+unix && check "marker written, mode 600" '[ "$(ls -l "$MARK" | cut -c 1-10)" = "-rw-------" ] && grep -q "^on settings " "$MARK"'
 check "log says it was turned on" 'grep -q "auto-update-on file=settings tool=python3" "$SW/plugin.log"'
 check "the log holds no path or file content" '! grep "auto-update" "$SW/plugin.log" | grep -q "/\|ECC\|opus"'
 
@@ -881,7 +888,7 @@ run start "$(start "$S32" "$TX32" "$P6" resume)"
 has "known: said" "SnapWork also turned on automatic updates"
 has "known: names that file" "on the snapwork entry in ~/.claude/plugins/known_marketplaces.json."
 check "known: only autoUpdate added" 'turned_on "$KM" "$T/known.orig" known'
-check "known: mode kept (664)" '[ "$(ls -l "$KM" | cut -c 1-10)" = "-rw-rw-r--" ]'
+unix && check "known: mode kept (664)" '[ "$(ls -l "$KM" | cut -c 1-10)" = "-rw-rw-r--" ]'
 check "known: backup" 'cmp -s "$KM.snapwork-bak" "$T/known.orig"'
 check "known: settings untouched" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
 check "log: file=known" 'grep -q "auto-update-on file=known" "$SW/plugin.log"'
@@ -915,25 +922,27 @@ run start "$(start "$S32" "$TX32" "$P6" resume)"
 check "a malformed known_marketplaces.json (it may hold a choice): settings untouched" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
 
 # a symlinked settings file or folder: untouched
-fresh_start
-settings_with "$SNAP_SRC"
-mv "$CL/settings.json" "$T/real-settings.json"
-ln -s "$T/real-settings.json" "$CL/settings.json"
-run start "$(start "$S32" "$TX32" "$P6" resume)"
-lacks "symlink: nothing said" "automatic updates"
-check "symlink: target untouched" 'cmp -s "$T/real-settings.json" "$T/settings.orig"'
-check "symlink: still a link, no backup" '[ -L "$CL/settings.json" ] && [ ! -e "$CL/settings.json.snapwork-bak" ]'
-check "log: symlink" 'grep -q "auto-update-skip why=symlink" "$SW/plugin.log"'
-fresh_start
-mkdir -p "$T/realclaude"
-CL_KEEP=$CL
-CL=$T/realclaude
-settings_with "$SNAP_SRC"
-CL=$CL_KEEP
-ln -s "$T/realclaude" "$CL"
-run start "$(start "$S32" "$TX32" "$P6" resume)"
-check "a symlinked folder: untouched" 'cmp -s "$T/realclaude/settings.json" "$T/settings.orig" && [ ! -e "$T/realclaude/settings.json.snapwork-bak" ]'
-rm -f "$CL"
+if unix; then
+  fresh_start
+  settings_with "$SNAP_SRC"
+  mv "$CL/settings.json" "$T/real-settings.json"
+  ln -s "$T/real-settings.json" "$CL/settings.json"
+  run start "$(start "$S32" "$TX32" "$P6" resume)"
+  lacks "symlink: nothing said" "automatic updates"
+  check "symlink: target untouched" 'cmp -s "$T/real-settings.json" "$T/settings.orig"'
+  check "symlink: still a link, no backup" '[ -L "$CL/settings.json" ] && [ ! -e "$CL/settings.json.snapwork-bak" ]'
+  check "log: symlink" 'grep -q "auto-update-skip why=symlink" "$SW/plugin.log"'
+  fresh_start
+  mkdir -p "$T/realclaude"
+  CL_KEEP=$CL
+  CL=$T/realclaude
+  settings_with "$SNAP_SRC"
+  CL=$CL_KEEP
+  ln -s "$T/realclaude" "$CL"
+  run start "$(start "$S32" "$TX32" "$P6" resume)"
+  check "a symlinked folder: untouched" 'cmp -s "$T/realclaude/settings.json" "$T/settings.orig" && [ ! -e "$T/realclaude/settings.json.snapwork-bak" ]'
+  rm -f "$CL"
+fi
 
 # Codex never touches it (it updates itself when the app starts)
 fresh_start
@@ -997,7 +1006,7 @@ farm() {
       fn=${fp##*/}
       { [ -x "$fp" ] && [ ! -d "$fp" ] && [ ! -e "$fd/$fn" ]; } || continue
       leave=0
-      for x in "$@"; do case $fn in $x) leave=1 ;; esac; done
+      for x in "$@"; do case $fn in $x | $x.exe) leave=1 ;; esac; done
       [ "$leave" -eq 1 ] || ln -s "$fp" "$fd/$fn"
     done
   done
@@ -1021,7 +1030,7 @@ for variant in nopy:node nonode:bun; do
   TPATH=
   has "$want: said" "SnapWork also turned on automatic updates"
   check "$want: settings turned on" 'turned_on "$CL/settings.json" "$T/settings.orig" settings'
-  check "$want: mode kept" '[ "$(ls -l "$CL/settings.json" | cut -c 1-10)" = "-rw-r-----" ]'
+  unix && check "$want: mode kept" '[ "$(ls -l "$CL/settings.json" | cut -c 1-10)" = "-rw-r-----" ]'
   check "$want: backup" 'cmp -s "$CL/settings.json.snapwork-bak" "$T/settings.orig"'
   check "$want: known untouched" 'cmp -s "$KM" "$T/known.orig"'
   check "$want: log names the tool" 'grep -q "auto-update-on file=settings tool=$want" "$SW/plugin.log"'
@@ -1046,6 +1055,7 @@ for variant in nopy:node nonode:bun; do
   run start "$(start "$S32" "$TX32" "$P6" resume)"
   TPATH=
   check "$want: malformed untouched" 'cmp -s "$CL/settings.json" "$T/settings.orig" && [ ! -e "$MARK" ]'
+  unix || continue
   fresh_start
   settings_with "$SNAP_SRC"
   mv "$CL/settings.json" "$T/real-settings.json"
@@ -1064,12 +1074,24 @@ has "no tool: the start still says who it is" "You are a member of the SnapWork 
 lacks "no tool: nothing said about updates" "automatic updates"
 check "no tool: untouched, no marker" 'cmp -s "$CL/settings.json" "$T/settings.orig" && [ ! -e "$MARK" ]'
 check "log: no-tool" 'grep -q "auto-update-skip why=no-tool" "$SW/plugin.log"'
+# a python3 that does not run (Windows' Microsoft Store stand-in) is passed over for node or bun
+mkdir -p "$T/stubpy"
+printf '#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store"\nexit 9009\n' > "$T/stubpy/python3"
+chmod 755 "$T/stubpy/python3"
+fresh_start
+settings_with "$SNAP_SRC"
+known_with "$SNAP_KNOWN"
+TPATH=$T/stubpy:$PATH
+run start "$(start "$S32" "$TX32" "$P6" resume)"
+TPATH=
+check "a python3 that does not run is not used" '! tail -n 1 "$SW/plugin.log" | grep -q "tool=python3" && grep "auto-update" "$SW/plugin.log" | tail -n 1 | grep -q "tool=node\|tool=bun\|why=no-tool"'
+check "and the settings are whole" 'turned_on "$CL/settings.json" "$T/settings.orig" settings || cmp -s "$CL/settings.json" "$T/settings.orig"'
 fresh_start
 
 echo "== 24. files: the scripts in ~/.snapwork kept current; Codex attach: and fetch: lines"
 SCRIPTS=$ROOT/plugins/snapwork/scripts
 check "a join put the file helper in ~/.snapwork" 'cmp -s "$SCRIPTS/snapwork-files.sh" "$SW/snapwork-files.sh"'
-check "read-only for its owner" '[ "$(ls -l "$SW/snapwork-files.sh" | cut -c 1-10)" = "-r-x------" ]'
+unix && check "read-only for its owner" '[ "$(ls -l "$SW/snapwork-files.sh" | cut -c 1-10)" = "-r-x------" ]'
 ROOM_Y=15151515-0000-4000-8000-00000000000f
 echo "kfr-yyyy-0001|$ROOM_Y|Files space Y" >> "$T/fake/spaces"
 C9=01a171a2-56e9-7881-86fe-e9ca50710009
@@ -1092,12 +1114,14 @@ check "the setup's pinned connections are there (section 13)" 'grep -q -l "\"hoo
 PINNED=$SW/rooms/$ROOM_S.$SET_AGENT.json
 cp "$PINNED" "$T/pinned.before"
 # pins that cannot take the new hashes (a folder it may not write) stop both scripts
-chmod 500 "$SW/rooms"
-run_cx start "$(cx_start "$C9" "$CX9" "$P9" resume)"
-chmod 700 "$SW/rooms"
-check "while a pin cannot be rewritten, neither script is replaced" 'grep -q "old hook" "$SW/snapwork-hook.sh" && grep -q "version: 0" "$SW/snapwork-files.sh"'
-has "and the chat is told how to get file sending" "run the setup line again to get file sending"
-check "and no pin is changed" 'cmp -s "$T/pinned.before" "$PINNED"'
+if unix; then
+  chmod 500 "$SW/rooms"
+  run_cx start "$(cx_start "$C9" "$CX9" "$P9" resume)"
+  chmod 700 "$SW/rooms"
+  check "while a pin cannot be rewritten, neither script is replaced" 'grep -q "old hook" "$SW/snapwork-hook.sh" && grep -q "version: 0" "$SW/snapwork-files.sh"'
+  has "and the chat is told how to get file sending" "run the setup line again to get file sending"
+  check "and no pin is changed" 'cmp -s "$T/pinned.before" "$PINNED"'
+fi
 check "no staged copies are left" '! ls "$SW" | grep -q "tmp" && ! ls "$SW/rooms" | grep -q "tmp"'
 # a pinned state not in the setup's shape is left as it is and blocks no one
 BADPIN=$SW/rooms/$ROOM_Y.00000000-0000-4000-8000-0000000000cc.json
@@ -1111,7 +1135,7 @@ check "and the older hook with it" 'cmp -s "$SCRIPTS/snapwork-hook.sh" "$SW/snap
 check "each pinned connection carries the new hook's hash" 'pins_are hookSha "$(sha_file "$SW/snapwork-hook.sh")"'
 check "and the file helper's (a pin from before files gets one)" 'pins_are filesSha "$(sha_file "$SW/snapwork-files.sh")"'
 check "the rest of the connection is kept" 'grep -v "Sha\"" "$T/pinned.before" > "$T/p1" && grep -v "Sha\"" "$PINNED" > "$T/p2" && cmp -s "$T/p1" "$T/p2"'
-check "still owner-only" '[ "$(ls -l "$PINNED" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "still owner-only" '[ "$(ls -l "$PINNED" | cut -c 1-10)" = "-rw-------" ]'
 check "no staged pins are left after it" '! ls "$SW/rooms" | grep -q "tmp"'
 check "the log says the pins moved" 'grep -q "kit-repin pins=" "$SW/plugin.log"'
 # the setup's listener, in its folder, runs the hook it now names: no hash mismatch
@@ -1135,8 +1159,8 @@ ln -s "$T/elsewhere.sh" "$SW/snapwork-files.sh"
 mkdir -p "$T/setup-keep"
 for f in $(grep -l '"hookSha"' "$SW"/rooms/*.json); do mv "$f" "$T/setup-keep/"; done
 run_cx start "$(cx_start "$C9" "$CX9" "$P9" resume)"
-check "a linked target: the hook is not replaced either" 'grep -q "old hook" "$SW/snapwork-hook.sh"'
-check "and the link is left alone" '[ -L "$SW/snapwork-files.sh" ] && [ "$(cat "$T/elsewhere.sh")" = "#!/bin/sh" ]'
+unix && check "a linked target: the hook is not replaced either" 'grep -q "old hook" "$SW/snapwork-hook.sh"'
+unix && check "and the link is left alone" '[ -L "$SW/snapwork-files.sh" ] && [ "$(cat "$T/elsewhere.sh")" = "#!/bin/sh" ]'
 rm -f "$SW/snapwork-files.sh"
 run_cx start "$(cx_start "$C9" "$CX9" "$P9" resume)"
 mv "$T/setup-keep"/*.json "$SW/rooms/"
@@ -1262,7 +1286,7 @@ has "the join line names the room" "Room G"
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'
-check "log mode 600" '[ "$(ls -l "$SW/plugin.log" | cut -c 1-10)" = "-rw-------" ]'
+unix && check "log mode 600" '[ "$(ls -l "$SW/plugin.log" | cut -c 1-10)" = "-rw-------" ]'
 check "log has no invite codes" '! grep -q "kfr-" "$SW/plugin.log"'
 check "log has no keys" '! grep -q -i "testkey\|legacykey\|setupkey" "$SW/plugin.log"'
 check "log has no message text" '! grep -q "what is new\|please join" "$SW/plugin.log"'
@@ -1272,6 +1296,7 @@ check "log shows short session ids only" '! grep -q "$S1" "$SW/plugin.log" && gr
 check "no state file holds a broken quote" 'for f in "$SW"/rooms/*.json; do python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f" || exit 1; done'
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$SKIPPED" -eq 0 ] || printf '%s skipped on Windows (file modes, symlinks)\n' "$SKIPPED"
 echo "== My agents (tests/my-agents.sh)"
 ${TEST_SH:-sh} "$ROOT/tests/my-agents.sh" || FAIL=$((FAIL + 1))
 [ "$FAIL" -eq 0 ]
