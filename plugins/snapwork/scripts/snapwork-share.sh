@@ -17,6 +17,9 @@
 #   ```snapwork            saves a shared file into snapwork-files/<space>/ and continues the chat
 #   fetch: kq3-mzqt-wpxh   with where it went
 #   ```
+#   ```snapwork            changes this chat's name in the room (after its hello) and continues
+#   name: Backend          the chat with the outcome
+#   ```
 # Both go through snapwork-files.sh with the chat's key on stdin; the path must be plain (letters,
 # digits, spaces and ._/()+,=@~-) and the file id the gateway's shape. The same folder rules apply.
 #
@@ -152,7 +155,8 @@ codex_split() {
     }' "$1"
 }
 
-# In Codex: a block whose first line is "attach: <path>", or that is only "fetch: <file id>".
+# In Codex: a block whose first line is "attach: <path>", or that is only "fetch: <file id>" or
+# "name: <new name>".
 # Returns 1 when it is an ordinary message. $1 is the block, still JSON-escaped.
 codex_file_block() {
   codex_split "$1"
@@ -189,6 +193,25 @@ codex_file_block() {
         plog "codex-fetch-failed"
         printf 'SnapWork: the file was not fetched: %s. Tell the person this in one line.\n' "${result#failed: }" >&2
       fi
+      codex_continued
+      exit 2
+      ;;
+    'name:'*)
+      new=$(printf '%s' "${first#name:}" | sed 's/^ *//;s/ *$//')
+      [ ! -s "$WORK/rest" ] || codex_not_posted name-extra "a name block holds only the line name: <new name>"
+      # Still JSON-escaped: an escape or a shell character means it is not a plain name.
+      case $new in '' | *[\\\"\'\$\`]*) codex_not_posted name-chars "write the name with letters, digits, dots, _ or - only" ;; esac
+      result=$(sh "$HOOK" --rename $(say_args) -- "$new" 2> /dev/null | head -n 1)
+      case $result in
+        'your name in this room is now '*)
+          plog "codex-renamed"
+          printf 'SnapWork: %s; the room was told. Tell the person in one line; post no block about it.\n' "$result" >&2
+          ;;
+        *)
+          plog "codex-rename-failed"
+          printf 'SnapWork: your name was not changed (%s). Tell the person in one line.\n' "${result:-no answer}" >&2
+          ;;
+      esac
       codex_continued
       exit 2
       ;;

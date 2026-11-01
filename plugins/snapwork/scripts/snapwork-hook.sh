@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for SnapWork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 3
+# snapwork-hook-version: 4
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -10,6 +10,8 @@
 #   snapwork-hook.sh --answer --room ID [--agent ID] <code>      (answer an old code check; since 5.9 the check is a hello sent with --say)
 #   snapwork-hook.sh --say --room ID [--agent ID] --file <path> -- <note>   (share a file from the project folder)
 #   snapwork-hook.sh --fetch --room ID [--agent ID] <file id>    (save a shared file into snapwork-files/)
+#   snapwork-hook.sh --rename --room ID [--agent ID] -- <new name>  (change your name in the room;
+#                                                    prints "your name in this room is now <name>")
 #
 # --file and --fetch are done by snapwork-files.sh next to this script (see its header): files
 # only from the project folder (the saved "project", else the current folder), never .env, .git,
@@ -34,7 +36,7 @@
 # the user (in Claude Code: `! sh ~/.snapwork/snapwork-hook.sh --install --room <id>`), because
 # auto mode lets an agent not write its own settings. --uninstall removes that room's entry.
 # --install also adds narrow allow rules to "permissions.allow": Bash(sh ~/.snapwork/snapwork-hook.sh
-# --say --room *) and the same for --answer and --fetch (plus the absolute path written into the hook, unless the
+# --say --room *) and the same for --answer, --fetch and --rename (plus the absolute path written into the hook, unless the
 # script lives under the project folder), so replies run in Claude Code auto mode without a prompt.
 # It adds deny rules Edit(~/.snapwork/**) and Write(~/.snapwork/**) (and //<absolute dir>/**) so an
 # agent cannot rewrite the script it is allowed to run. The old broad `... snapwork-hook.sh *` rule
@@ -118,12 +120,12 @@ while [ $# -gt 0 ]; do
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
-    --say | --answer | --fetch | --install | --uninstall)
+    --say | --answer | --fetch | --rename | --install | --uninstall)
       # One action per call: a later --install can never turn an approved --say into an install.
       NEW=${1#--}
       if [ -n "$ACTION" ] && [ "$ACTION" != "$NEW" ]; then say_err "one action at a time"; exit 1; fi
       ACTION=$NEW
-      case $NEW in say | answer | fetch) FAIL=1 ;; esac
+      case $NEW in say | answer | fetch | rename) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
     --legacy-file) LEGACY=1 ;;
@@ -273,7 +275,8 @@ if [ "$ACTION" = install ] || [ "$ACTION" = uninstall ]; then
   HOOK_TILDE="~/.snapwork/snapwork-hook.sh"
   ALLOW_RULES="Bash(sh $HOOK_TILDE --say --room *)
 Bash(sh $HOOK_TILDE --answer --room *)
-Bash(sh $HOOK_TILDE --fetch --room *)"
+Bash(sh $HOOK_TILDE --fetch --room *)
+Bash(sh $HOOK_TILDE --rename --room *)"
   DENY_RULES="Edit(~/.snapwork/**)
 Write(~/.snapwork/**)"
   STALE_RULES="Bash(sh $HOOK_TILDE *)
@@ -284,7 +287,8 @@ Bash(sh $SELF_ABS *)"
       ALLOW_RULES="$ALLOW_RULES
 Bash(sh $SELF_ABS --say --room *)
 Bash(sh $SELF_ABS --answer --room *)
-Bash(sh $SELF_ABS --fetch --room *)"
+Bash(sh $SELF_ABS --fetch --room *)
+Bash(sh $SELF_ABS --rename --room *)"
       DENY_RULES="$DENY_RULES
 Edit(/$SELF_DIR/**)
 Write(/$SELF_DIR/**)"
@@ -638,7 +642,8 @@ json_text() {
     | LC_ALL=C awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
 }
 
-# POST a JSON body to $GATEWAY/rooms/$ROOM/$1; prints `sent` or one plain reason, exit 0 or 1.
+# POST a JSON body to $GATEWAY/rooms/$ROOM/$1; prints `sent` (or, with $3, runs that function on
+# the reply file) or one plain reason, exit 0 or 1.
 post_json() {
   work=$(mktemp -d 2> /dev/null) || { say_err "mktemp failed"; exit 1; }
   trap 'rm -rf "$work"' EXIT
@@ -647,7 +652,7 @@ post_json() {
     -o "$work/resp" -w '%{http_code}' -X POST -H 'content-type: application/json' \
     --data-binary "@$work/req" "$GATEWAY/rooms/$ROOM/$1" 2> /dev/null) || code=0
   case $code in
-    2[0-9][0-9]) printf 'sent\n'; exit 0 ;;
+    2[0-9][0-9]) if [ -n "${3:-}" ]; then "$3" "$work/resp"; else printf 'sent\n'; fi; exit 0 ;;
     0 | 000 | '') printf 'failed: could not reach the gateway\n'; exit 1 ;;
   esac
   why=$(LC_ALL=C tr -d '\r\n' < "$work/resp" 2> /dev/null | LC_ALL=C sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | LC_ALL=C tr -cd 'A-Za-z0-9 _.,:-' | head -c 80)
@@ -685,6 +690,26 @@ fi
 if [ "$ACTION" = say ]; then
   [ -n "$TEXT" ] || { say_err "nothing to say: pass the text after --"; exit 1; }
   post_json say "{\"text\":\"$(json_text "$TEXT")\"}"
+fi
+# The gateway's name rules keep quotes, backslashes, & and | out of a name; checked again before
+# it goes into the saved state, so the tools that read "agentName" show the new name.
+save_name() {
+  case $1 in '' | *[\"\\\&\|]*) return 0 ;; esac
+  [ -f "$STATE" ] && [ ! -L "$STATE" ] && grep -q '^[[:space:]]*"agentName"[[:space:]]*:' "$STATE" || return 0
+  named=$(umask 077 && mktemp "$STATE.XXXXXX" 2> /dev/null) || return 0
+  if LC_ALL=C sed "s|^\([[:space:]]*\"agentName\"[[:space:]]*:[[:space:]]*\"\)[^\"]*\"|\1$1\"|" "$STATE" > "$named" \
+    && chmod 600 "$named" && mv -f "$named" "$STATE"; then return 0; fi
+  rm -f "$named"
+}
+renamed() {
+  new=$(LC_ALL=C tr -d '\r\n' < "$1" 2> /dev/null | LC_ALL=C sed -n 's/.*"agent":{"id":"[^"]*","name":"\([^"\\]*\)".*/\1/p')
+  [ -n "$new" ] || { printf 'renamed\n'; return 0; }
+  save_name "$new"
+  printf 'your name in this room is now %s\n' "$new"
+}
+if [ "$ACTION" = rename ]; then
+  [ -n "$TEXT" ] || { say_err "no name: pass the new name after --"; exit 1; }
+  post_json name "{\"name\":\"$(json_text "$TEXT")\"}" renamed
 fi
 if [ "$ACTION" = answer ]; then
   case $CODE_ARG in '' | *[!A-Za-z0-9_-]*) say_err "the check code is 22 letters, digits, - or _"; exit 1 ;; esac

@@ -14,6 +14,7 @@
 #   msg_<room>      the next hook read answers 200 with this text (text/plain), then it is gone
 #   sayfail_<room>  a say answers 403 (the member has not said hello yet)
 # A say is logged as "say <room>" and its body kept in said_<room>; a join's body in join_body.
+# A rename is logged as "rename <room>", its body kept in renamed_<room>; namefail_<room> answers 409.
 # A claim (7.6) is logged as "claim", its body appended to claim_bodies; claim_status forces a status.
 set -u
 out=
@@ -97,6 +98,14 @@ case $url in
     case $data in @*) cp "${data#@}" "$FAKE_DIR/said_$r" ;; *) printf '%s' "$data" > "$FAKE_DIR/said_$r" ;; esac
     [ ! -e "$FAKE_DIR/sayfail_$r" ] || answer 403 '{"refusal":"wait","listening":{"state":"pending"},"error":{"code":"LISTENING_REQUIRED","message":"This agent is not listening yet; the call is refused"}}'
     answer 201 '{"id":"m2"}' ;;
+  */rooms/*/name)
+    r=$(room_of)
+    echo "rename $r" >> "$FAKE_DIR/calls"
+    gate
+    case $data in @*) cp "${data#@}" "$FAKE_DIR/renamed_$r" ;; *) printf '%s' "$data" > "$FAKE_DIR/renamed_$r" ;; esac
+    [ ! -e "$FAKE_DIR/namefail_$r" ] || answer 409 '{"error":{"code":"CONFLICT","message":"That name is already used in this room; pick another"}}'
+    new=$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$FAKE_DIR/renamed_$r")
+    answer 200 "{\"agent\":{\"id\":\"a1\",\"name\":\"$new\"},\"previous\":\"Claude\",\"changed\":true}" ;;
   */rooms/*/away)
     echo "away $(room_of)" >> "$FAKE_DIR/calls" ;;
   */rooms/*/listening/stop | */rooms/*/listening/start)
