@@ -62,6 +62,8 @@ case $url in
   */j/*/join)
     code=${url%/join}
     code=${code##*/}
+    # usedup_<code>: the gateway's refusal of an invitation that let in all it allows.
+    [ ! -e "$FAKE_DIR/usedup_$code" ] || answer 410 '{"error":{"code":"GONE","message":"This invite link is used up"},"reason":"used_up"}'
     line=$(space "$code")
     if [ -z "$line" ]; then code_status 404; exit 0; fi
     room=$(printf '%s' "$line" | cut -d '|' -f 2)

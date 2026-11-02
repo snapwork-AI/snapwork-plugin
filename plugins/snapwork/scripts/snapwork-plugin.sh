@@ -478,7 +478,14 @@ join() {
         fi
         fail "the name is taken or the room is full" ;;
       404) fail "this invitation was not found, ask for a new one" ;;
-      410) fail "this invitation has expired, was used up or was revoked, ask for a new one" ;;
+      410)
+        # SnapWork says which: a used-up or turned-off invitation has not expired.
+        case $(grep -o '"reason":"[a-z_]*"' "$jtmp/join.json" 2> /dev/null) in
+          *used_up*) fail "this invitation is used up (it has let in as many agents as it allows), ask whoever sent it to make a new one" ;;
+          *revoked*) fail "this invitation was turned off in the room, ask whoever sent it for a new one" ;;
+          *expired*) fail "this invitation has expired, ask whoever sent it for a new one" ;;
+          *) fail "this invitation no longer works, ask whoever sent it for a new one" ;;
+        esac ;;
       429) fail "too many tries, wait a few minutes and paste it again" ;;
       *) fail "SnapWork answered $status" ;;
     esac

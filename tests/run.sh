@@ -302,6 +302,11 @@ run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-zzzz-0001")"
 has "same invitation as the setup: already in" "through the SnapWork setup"
 check "setup state never gets a session" '! grep -q "\"session\"" "$SW/rooms/$ROOM_S.$SET_AGENT.json"'
 
+touch "$T/fake/usedup_kfr-used-0001"
+run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-used-0001")"
+has "a used-up invitation says it is used up" "this invitation is used up"
+check "and not that it expired" '! grep -q expired "$T/out"'
+
 echo "== 15. Claude Desktop copies (/fork keeps the original's sessionId on copied lines)"
 S13=13131313-aaaa-4000-8000-000000000013
 S14=14141414-aaaa-4000-8000-000000000014
