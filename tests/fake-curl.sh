@@ -16,6 +16,7 @@
 # A say is logged as "say <room>" and its body kept in said_<room>; a join's body in join_body.
 # A rename is logged as "rename <room>", its body kept in renamed_<room>; namefail_<room> answers 409.
 # A claim (7.6) is logged as "claim", its body appended to claim_bodies; claim_status forces a status.
+# A watcher's report is logged as "report <add> <body>" (adds) or "revival <id> <body>" (7.5).
 set -u
 out=
 wfmt=
@@ -165,8 +166,13 @@ case $url in
   */computer/work/*)
     echo "report ${url##*/} $data" >> "$FAKE_DIR/calls"
     answer 200 '{"add":{}}' ;;
+  */computer/revivals/*)
+    # 7.5: how bringing a chat back went, logged as "revival <id> <body>".
+    echo "revival ${url##*/} $data" >> "$FAKE_DIR/calls"
+    answer 200 '{"revival":{}}' ;;
   */computer/work\?*)
     echo "work" >> "$FAKE_DIR/calls"
+    printf '%s\n' "$url" > "$FAKE_DIR/work_url"
     [ ! -e "$FAKE_DIR/work_status" ] || answer "$(cat "$FAKE_DIR/work_status")" ''
     # Byte for byte (a command substitution would drop the last line break).
     if [ -f "$FAKE_DIR/work_lines" ]; then cp "$FAKE_DIR/work_lines" "$out"; else : > "$out"; fi

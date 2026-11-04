@@ -13,11 +13,20 @@ T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/bin" "$T/home/proj" "$T/home/proj2" "$T/home/proj3" "$T/fake" "$T/tx"
 cp "$ROOT/tests/fake-curl.sh" "$T/bin/curl"
-# A claude that records how it was called and answers like Claude Code 2.1.312's --bg.
+# A claude that records how it was called and answers like Claude Code 2.1.312's --bg: a fork or a
+# fresh chat gets a new id; --resume without --fork-session keeps the chat's id (as Claude Code
+# does), unless claude_copy says it was running (then it starts a copy with a new id).
+# agents_extra adds rows to `agents --json`; claude_nobg makes --bg fail without an id. `stop` is
+# recorded; claude_stopfail makes it fail.
 cat > "$T/bin/claude" << 'EOF'
 #!/bin/sh
+if [ "${1:-}" = stop ]; then
+  printf 'stop |%s\n' "${2:-}" >> "$FAKE_DIR/claude_stops"
+  [ ! -e "$FAKE_DIR/claude_stopfail" ] || exit 1
+  exit 0
+fi
 if [ "${1:-}" = agents ]; then
-  printf '[{"sessionId":"e2858c3e-d4ee-49ef-b4a0-57ce8ff97fa8","kind":"background"},{"sessionId": "fee53b8c-6a51-45d3-8d48-980b9689f68a","kind":"background"}]\n'
+  printf '[{"sessionId":"e2858c3e-d4ee-49ef-b4a0-57ce8ff97fa8","kind":"background"},{"sessionId": "fee53b8c-6a51-45d3-8d48-980b9689f68a","kind":"background"}%s]\n' "$(cat "$FAKE_DIR/agents_extra" 2> /dev/null)"
   exit 0
 fi
 { printf 'cwd=%s path=%s' "$(pwd -P)" "$PATH"; for a in "$@"; do printf ' |%s' "$a"; done; printf '\n'; } >> "$FAKE_DIR/claude_calls"
@@ -25,7 +34,15 @@ if [ -e "$FAKE_DIR/claude_untrusted" ]; then
   echo "Workspace not trusted. Run \`claude\` in $(pwd) once and accept the trust prompt, then retry." >&2
   exit 1
 fi
-printf 'Starting background service\342\200\246\nbackgrounded \302\267 fee53b8c \302\267 %s\n' "$6"
+if [ -e "$FAKE_DIR/claude_nobg" ]; then
+  echo "Error: could not start the background service" >&2
+  exit 1
+fi
+id=fee53b8c
+if [ "${1:-}" = --resume ] && [ "${3:-}" != --fork-session ] && [ ! -e "$FAKE_DIR/claude_copy" ]; then
+  id=$(printf '%s' "$2" | cut -c 1-8)
+fi
+printf 'Starting background service\342\200\246\nbackgrounded \302\267 %s \302\267 %s\n' "$id" "$6"
 EOF
 chmod 755 "$T/bin/curl" "$T/bin/claude"
 HOMEDIR=$(cd "$T/home" && pwd -P)
@@ -58,7 +75,7 @@ has() { if grep -q -F -e "$2" "$T/out"; then ok; else bad "$1 (wanted: $2)" "$(c
 called() { if grep -q -F -e "$2" "$T/fake/calls"; then ok; else bad "$1 (no call: $2)" "$(cat "$T/fake/calls")"; fi; }
 not_called() { if grep -q -F -e "$2" "$T/fake/calls"; then bad "$1 (unwanted call: $2)"; else ok; fi; }
 check() { if eval "$2"; then ok; else bad "$1"; fi; }
-reset() { : > "$T/fake/calls"; rm -f "$T/fake/claim_status" "$T/fake/claim_bodies" "$T/fake/connect_status" "$T/fake/key_refused" "$T/fake/claude_calls" "$T/fake/claude_untrusted" "$T/fake/work_status" "$T/fake/lookup_status" "$T/fake/lookup_runtime"; }
+reset() { : > "$T/fake/calls"; rm -f "$T/fake/claim_status" "$T/fake/claim_bodies" "$T/fake/connect_status" "$T/fake/key_refused" "$T/fake/claude_calls" "$T/fake/claude_untrusted" "$T/fake/work_status" "$T/fake/lookup_status" "$T/fake/lookup_runtime" "$T/fake/claude_nobg" "$T/fake/claude_copy" "$T/fake/agents_extra" "$T/fake/claude_stops" "$T/fake/claude_stopfail"; }
 
 transcript() { f=$T/tx/$1.jsonl; printf '{"type":"user","sessionId":"%s"}\n' "$1" > "$f"; printf '%s' "$f"; }
 prompt() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"%s"}' "$1" "$2" "$3" "$4"; }
@@ -276,10 +293,12 @@ check "the log says so, without the key" 'grep -q "claim-ok status=201" "$SW/plu
 echo "== 10a2. a claim refreshes an older watcher copy (computers connected on 0.3.0)"
 reset
 sed -i.bak 's/^VERSION=.*/VERSION=0.3.0/' "$SW/snapwork-watch.sh" && rm -f "$SW/snapwork-watch.sh.bak"
+# The watcher's starts above left its "starting" flag; minutes have passed since.
+rm -f "$SW/watch.starting"
 SA2=a2a2a2a2-aaaa-4000-8000-0000000000a2
 printf 'kfr-aaaa-00a2|aaaaaaaa-0000-4000-8000-0000000000a2|Space A2\n' >> "$T/fake/spaces"
 run prompt "$(prompt "$SA2" "$(transcript "$SA2")" "$P2" "${INVITE}kfr-aaaa-00a2")"
-check "the watcher copy is the plugin's again" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
+check "the watcher copy is the plugin's again" 'grep -q "^VERSION=0.3.7$" "$SW/snapwork-watch.sh"'
 unix && check "and stays owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
 
 echo "== 10b. another chat in the same folder: the same home id"
@@ -388,8 +407,314 @@ printf '{\n  "kind": "folder",\n  "home": "%s",\n  "project": "%s/gone"\n}\n' "$
 watch
 called "a missing folder is refused" "report $ADD1 {\"state\":\"failed\",\"failure\":\"home_gone\"}"
 check "nothing started for them" '[ ! -f "$T/fake/claude_calls" ]'
-check "the watcher says it is 0.3.2" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
+check "the watcher says it is 0.3.7" 'grep -q "^VERSION=0.3.7$" "$SW/snapwork-watch.sh"'
 check "the connect script and the watcher name the same version" '[ "$(sed -n "s/^WATCH_VERSION=//p" "$SCRIPTS/snapwork-connect.sh")" = "$(sed -n "s/^VERSION=//p" "$SCRIPTS/snapwork-watch.sh")" ]'
+
+echo "== 11. the watcher brings a chat in a room back (7.5)"
+# The tests never look at a real Claude config folder.
+unset CLAUDE_CONFIG_DIR
+RV=e7e7e7e7-0000-4000-8000-000000000001
+RSP=bbbbbbbb-0000-4000-8000-000000000011
+RAG=00000000-0000-4000-8000-0000000000e1
+RS=abcdef01-aaaa-4000-8000-0000000000e1
+REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
+# room_file <path> <session> <project> [<app>] [<agent id>]: a connection as the plugin saves it.
+room_file() {
+  printf '{\n  "session": "%s",\n  "app": "%s",\n  "setup": "x",\n  "project": "%s",\n  "gateway": "https://space.snapwork.ai",\n  "roomId": "%s",\n  "agentId": "%s",\n  "spaceName": "Room R",\n  "agentName": "Claude",\n  "key": "testkeyrevive"\n}\n' \
+    "$2" "${4:-claude}" "$3" "$RSP" "${5:-$RAG}" > "$1"
+  chmod 600 "$1"
+}
+RSTATE=$SW/rooms/$RSP.$RAG.json
+room_file "$RSTATE" "$RS" "$P1"
+revive_line() { printf 'revive\t%s\t%s\t%s\t%s\t%s\n' "$1" "${5:-claude-code}" "$2" "$3" "$4" > "$T/fake/work_lines"; }
+# The arguments claude got, after its folder and PATH.
+claude_args() { sed -n "${1:-1}p" "$T/fake/claude_calls" | sed 's/^cwd=[^ ]* path=[^ ]*//'; }
+nothing_ran() { check "$1: nothing started" '[ ! -f "$T/fake/claude_calls" ]'; }
+revival() { called "$1" "revival $RV {\"state\":\"failed\",\"failure\":\"$2\"}"; }
+
+reset
+revive_line "$RV" "$RSP" "$RAG" "Room R"
+watch
+check "one chat started" '[ "$(wc -l < "$T/fake/claude_calls" | tr -d " ")" = 1 ]'
+check "in the chat's own folder" 'grep -q "^cwd=$P1 " "$T/fake/claude_calls"'
+check "with the PATH its home recorded" 'grep -q " path=$T/bin:" "$T/fake/claude_calls"'
+check "the resume command, exactly: the saved chat, the label, the fixed prompt" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |Room R |$REVIVE_PROMPT" ]'
+check "no id from SnapWork reaches the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" "$T/fake/claude_calls"'
+called "reported started with the chat's id" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
+not_called "not reported as an add" "report $RV"
+check "the poll says the watcher knows revivals (v=0.3.7)" 'grep -q "[?&]v=0.3.7$" "$T/fake/work_url"'
+check "logged with short ids only" 'grep -q "revive id=e7e7e7e7 session=abcdef01$" "$SW/watch.log" && grep -q "started revive=e7e7e7e7 session=abcdef01" "$SW/watch.log"'
+check "the room's name is not logged" '! grep -q "Room R" "$SW/watch.log"'
+check "the watcher marked that it was starting a chat, owner only" '[ -f "$SW/watch.starting" ] && { [ "$WINDOWS" -eq 1 ] || [ "$(ls -l "$SW/watch.starting" | cut -c 1-10)" = "-rw-------" ]; }'
+check "the log keeps no full id" '! grep -q "$RS" "$SW/watch.log" && ! grep -q "$RV" "$SW/watch.log"'
+not_called "the key never in argv" "KEY-IN-ARGV"
+check "the computer key went through curl's config" 'grep -q "Bearer swc_testcomputerkey123" "$T/fake/stdin_last"'
+
+echo "== 11a. what a revive line can and cannot change"
+reset
+revive_line "$RV" "$RSP" "$RAG" '-rf $(touch pwned)'
+watch
+check "a label a shell or a flag would read is replaced" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |SnapWork |$REVIVE_PROMPT" ]'
+check "nothing ran from the label" '[ ! -e "$P1/pwned" ] && [ ! -e "$HOMEDIR/pwned" ]'
+reset
+printf 'revive\t%s\tclaude-code\t%s\t%s\tRoom R\tsomething new\n' "$RV" "$RSP" "$RAG" > "$T/fake/work_lines"
+watch
+check "a field this watcher does not know yet is dropped" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |Room R |$REVIVE_PROMPT" ]'
+reset
+revive_line "not-a-uuid" "$RSP" "$RAG" "Room R"
+watch
+nothing_ran "a bad revive id"
+not_called "and nothing reported for it" "revival"
+check "logged" 'grep -q "bad-item" "$SW/watch.log"'
+reset
+revive_line "$RV" "../../etc" "$RAG" "Room R"
+watch
+nothing_ran "a bad room id"
+revival "a bad room id is a chat this computer does not have" chat_gone
+reset
+revive_line "$RV" "$RSP" "$RAG/../x" "Room R"
+watch
+nothing_ran "a bad agent id"
+revival "a bad agent id too" chat_gone
+
+echo "== 11b. older lines still work next to revive lines; unknown ones are skipped"
+reset
+{
+  printf 'start\t%s\tclaude-code\t%s\t%s\tDesign\n' "$ADD1" "$S1" "${INVITE}kfr-bbbb-0001"
+  printf 'later\tsomething\tthis\twatcher\tdoes\tnot\tknow\n'
+  printf 'revive\t%s\tclaude-code\t%s\t%s\tRoom R\n' "$RV" "$RSP" "$RAG"
+  printf 'start\t%s\tclaude-code\t%s\t%s\tRoom B\tfolder\n' "$ADD1" "$HID2" "${INVITE}kfr-bbbb-0002"
+} > "$T/fake/work_lines"
+watch
+check "three chats started" '[ "$(wc -l < "$T/fake/claude_calls" | tr -d " ")" = 3 ]'
+check "a start line without the 7th field is still a fork" '[ "$(claude_args 1)" = " |--resume |$S1 |--fork-session |--bg |--name |Design |${INVITE}kfr-bbbb-0001" ]'
+check "the revive in between" '[ "$(claude_args 2)" = " |--resume |$RS |--bg |--name |Room R |$REVIVE_PROMPT" ]'
+check "a folder start after it" '[ "$(claude_args 3)" = " |--bg |--name |Room B |${INVITE}kfr-bbbb-0002" ]'
+called "the add reported" "report $ADD1 {\"state\":\"started\",\"session_id\":\"$FORK_ID\"}"
+called "the revival reported" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
+
+echo "== 11c. chat_gone: no saved chat, folder or connection"
+reset
+revive_line "$RV" "$RSP" "00000000-0000-4000-8000-0000000000e9" "Room R"
+watch
+nothing_ran "an agent this computer never saved"
+revival "an agent this computer never saved" chat_gone
+reset
+room_file "$RSTATE" "" "$P1"
+revive_line "$RV" "$RSP" "$RAG" "Room R"
+watch
+nothing_ran "a connection with no chat"
+revival "a connection with no chat (freed by /clear, or a one-line setup)" chat_gone
+reset
+room_file "$RSTATE" "$RS" "relative/proj"
+watch
+revival "a relative folder" chat_gone
+reset
+room_file "$RSTATE" "$RS" "$HOMEDIR/gone"
+watch
+nothing_ran "a folder that is gone"
+revival "a folder that is gone" chat_gone
+reset
+room_file "$RSTATE" "$RS" "$P1"
+sed 's/"roomId": "[^"]*"/"roomId": "bbbbbbbb-0000-4000-8000-000000000099"/' "$RSTATE" > "$T/other.json" && cp "$T/other.json" "$RSTATE"
+watch
+nothing_ran "a connection that names another room"
+revival "a connection that names another room" chat_gone
+room_file "$RSTATE" "$RS" "$P1"
+if unix; then
+  reset
+  mv "$RSTATE" "$T/real.json"
+  ln -s "$T/real.json" "$RSTATE"
+  watch
+  nothing_ran "a linked connection"
+  revival "a linked connection is never read" chat_gone
+  rm -f "$RSTATE"
+  mv "$T/real.json" "$RSTATE"
+fi
+
+echo "== 11d. a room-only connection, only when it names that agent"
+RSP2=bbbbbbbb-0000-4000-8000-000000000022
+RAG2=00000000-0000-4000-8000-0000000000e2
+RS2=abcdef02-aaaa-4000-8000-0000000000e2
+reset
+printf '{\n  "session": "%s",\n  "project": "%s",\n  "roomId": "%s",\n  "agentId": "%s",\n  "key": "testkeyroomonly"\n}\n' "$RS2" "$P2" "$RSP2" "$RAG2" > "$SW/rooms/$RSP2.json"
+revive_line "$RV" "$RSP2" "$RAG2" "Room 2"
+watch
+check "resumed from the room-only connection, in its folder" 'grep -q "^cwd=$P2 " "$T/fake/claude_calls" && [ "$(claude_args)" = " |--resume |$RS2 |--bg |--name |Room 2 |$REVIVE_PROMPT" ]'
+reset
+revive_line "$RV" "$RSP2" "00000000-0000-4000-8000-0000000000e3" "Room 2"
+watch
+nothing_ran "a room-only connection of another agent"
+revival "a room-only connection of another agent" chat_gone
+rm -f "$SW/rooms/$RSP2.json"
+
+echo "== 11e. no_runtime"
+reset
+revive_line "$RV" "$RSP" "$RAG" "Room R" codex
+watch
+nothing_ran "Codex"
+revival "Codex is not brought back yet (7.4)" no_runtime
+reset
+room_file "$RSTATE" "$RS" "$P1" codex
+revive_line "$RV" "$RSP" "$RAG" "Room R"
+watch
+nothing_ran "a Codex chat saved here"
+revival "a chat this computer saved as Codex's" no_runtime
+room_file "$RSTATE" "$RS" "$P1"
+reset
+mv "$T/bin/claude" "$T/claude.kept"
+watch
+mv "$T/claude.kept" "$T/bin/claude"
+revival "no claude on this computer" no_runtime
+
+echo "== 11f. busy: it is still running"
+reset
+printf ',{"sessionId": "%s","kind":"interactive"}' "$RS" > "$T/fake/agents_extra"
+watch
+nothing_ran "a chat Claude lists"
+revival "a chat Claude lists as running" busy
+check "logged why" 'grep -q "busy why=listed" "$SW/watch.log"'
+reset
+mkdir -p "$HOMEDIR/.claude/projects/-proj"
+TXR=$HOMEDIR/.claude/projects/-proj/$RS.jsonl
+printf '{"type":"user"}\n' > "$TXR"
+watch
+nothing_ran "a chat whose transcript just changed"
+revival "a chat whose transcript changed in the last 10 minutes" busy
+reset
+age() { python3 -c "import os,sys,time; t=time.time()-int(sys.argv[2]); os.utime(sys.argv[1],(t,t))" "$1" "$2"; }
+age "$TXR" 120
+watch
+nothing_ran "a transcript changed 2 minutes ago"
+revival "a transcript changed 2 minutes ago" busy
+reset
+age "$TXR" 300
+watch
+called "a transcript 5 minutes old does not hold it back (3 minutes)" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
+reset
+touch -t 202001010000 "$TXR"
+watch
+called "an old transcript does not hold it back" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
+reset
+mkdir -p "$T/cfg/projects/-proj"
+printf '{"type":"user"}\n' > "$T/cfg/projects/-proj/$RS.jsonl"
+CLAUDE_CONFIG_DIR=$T/cfg
+export CLAUDE_CONFIG_DIR
+watch
+unset CLAUDE_CONFIG_DIR
+nothing_ran "a transcript under CLAUDE_CONFIG_DIR"
+revival "CLAUDE_CONFIG_DIR is where Claude keeps transcripts" busy
+reset
+touch "$T/fake/claude_copy"
+watch
+revival "Claude made a copy (it was running after all)" busy
+check "logged as a copy" 'grep -q "copy-started revive=e7e7e7e7 session=fee53b8c" "$SW/watch.log"'
+not_called "never reported as started" "revival $RV {\"state\":\"started\""
+check "the copy is stopped by its full id" '[ "$(cat "$T/fake/claude_stops")" = "stop |$FORK_ID" ]'
+check "never the chat itself" '! grep -q "$RS" "$T/fake/claude_stops"'
+check "logged as stopped" 'grep -q "copy-stopped revive=e7e7e7e7 session=fee53b8c" "$SW/watch.log"'
+reset
+touch "$T/fake/claude_copy" "$T/fake/claude_stopfail"
+watch
+revival "a copy that would not stop" busy
+check "logged as left running" 'grep -q "copy-left-running revive=e7e7e7e7 session=fee53b8c" "$SW/watch.log"'
+reset
+check "no stop when the chat came back as itself" 'watch; [ ! -f "$T/fake/claude_stops" ]'
+LISTENER=$SW/rooms/$RSP.$RAG.listener
+# A stand-in listener and the sleep under it: none is left running.
+stop_holder() { pkill -P "$holder" 2> /dev/null; kill "$holder" 2> /dev/null; }
+if unix; then
+  reset
+  sh -c 'sleep 30; :' "$T/snapwork-hook.sh" --event Stop --rewake --room "$RSP" --agent "$RAG" &
+  holder=$!
+  printf '%s Mon Nov  3 10:00:00 2026\n' "$holder" > "$LISTENER"
+  watch
+  stop_holder
+  nothing_ran "a live listener"
+  revival "its listener holds the lock" busy
+  check "logged why" 'grep -q "busy why=listener" "$SW/watch.log"'
+  reset
+  sleep 30 &
+  holder=$!
+  printf '%s Mon Nov  3 10:00:00 2026\n' "$holder" > "$LISTENER"
+  watch
+  stop_holder
+  called "a lock held by something that is not its listener does not hold it back" "revival $RV {\"state\":\"started\""
+  reset
+  sh -c 'sleep 30; :' "$T/snapwork-hook.sh" --room "$RSP2" &
+  holder=$!
+  printf '%s x\n' "$holder" > "$LISTENER"
+  watch
+  stop_holder
+  called "nor a listener of another room" "revival $RV {\"state\":\"started\""
+  reset
+  # A chat open in a terminal (claude --resume <id>), with no listener and not in Claude's list.
+  sh -c 'sleep 30; :' claude --resume "$RS" &
+  holder=$!
+  watch
+  stop_holder
+  nothing_ran "a process that names the chat"
+  revival "a process that names the chat (open in a terminal)" busy
+  check "logged why" 'grep -q "busy why=process" "$SW/watch.log"'
+fi
+reset
+printf '99999999 x\n' > "$LISTENER"
+watch
+called "a lock left by a listener that is gone does not hold it back" "revival $RV {\"state\":\"started\""
+rm -f "$LISTENER"
+
+echo "== 11g. not_trusted and start_failed"
+reset
+touch "$T/fake/claude_untrusted"
+watch
+revival "an untrusted folder" not_trusted
+reset
+touch "$T/fake/claude_nobg"
+watch
+revival "no id printed" start_failed
+check "the watcher says it knows revivals on its poll" 'grep -q "^VERSION=0.3.7$" "$SW/snapwork-watch.sh"'
+
+echo "== 11h. a chat starting on a connected computer brings an older watcher copy up to date"
+S12=12121212-aaaa-4000-8000-000000000012
+start_chat() { run start "{\"session_id\":\"$1\",\"transcript_path\":\"$2\",\"cwd\":\"$P2\",\"hook_event_name\":\"SessionStart\",\"source\":\"${3:-startup}\"}"; }
+set_watch_version() { sed -i.bak "s/^VERSION=.*/VERSION=$1/" "$SW/snapwork-watch.sh" && rm -f "$SW/snapwork-watch.sh.bak"; }
+reset
+rm -f "$SW/watch.starting" "$SW/watch-refresh.stamp"
+set_watch_version 0.3.2
+touch "$SW/watch.starting"
+start_chat "$S12" "$(transcript "$S12")"
+check "not while the watcher is starting a chat (or just did)" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh" && grep -q "watcher-refresh-later why=starting" "$SW/plugin.log"'
+check "and that is not counted for the hourly limit" '[ ! -f "$SW/watch-refresh.stamp" ]'
+age "$SW/watch.starting" 600
+start_chat "$S12" "$(transcript "$S12")"
+check "the watcher copy is this plugin's again" 'grep -q "^VERSION=0.3.7$" "$SW/snapwork-watch.sh"'
+check "logged" 'grep -q "watcher-refreshed to=0.3.7" "$SW/plugin.log"'
+check "the chat is told nothing about it" '! grep -q -i "watcher" "$T/out"'
+unix && check "the hourly stamp is owner only" '[ "$(ls -l "$SW/watch-refresh.stamp" | cut -c 1-10)" = "-rw-------" ]'
+: > "$SW/plugin.log"
+start_chat "$S12" "$(transcript "$S12")"
+check "the same version is left alone" '! grep -q "watcher-refreshed" "$SW/plugin.log"'
+set_watch_version 0.3.2
+start_chat "$S12" "$(transcript "$S12")"
+check "at most once an hour" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
+age "$SW/watch-refresh.stamp" 3700
+S13=13131313-aaaa-4000-8000-000000000013
+TXC=$T/tx/$S13.jsonl
+printf '{"type":"user","sessionId":"%s","forkedFrom":{"sessionId":"%s"}}\n' "$S13" "$S12" > "$TXC"
+start_chat "$S13" "$TXC" resume
+check "never from a copy (/fork, or a chat the watcher started)" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
+start_chat "$S12" "$(transcript "$S12")" startup
+check "after an hour, again" 'grep -q "^VERSION=0.3.7$" "$SW/snapwork-watch.sh"'
+rm -f "$SW/watch-refresh.stamp"
+set_watch_version 0.3.9
+: > "$SW/plugin.log"
+start_chat "$S12" "$(transcript "$S12")"
+check "a newer copy (the other app's plugin) is never taken back" 'grep -q "^VERSION=0.3.9$" "$SW/snapwork-watch.sh" && ! grep -q "watcher-refreshed" "$SW/plugin.log"'
+reset
+connect "$S9" "$(transcript "$S9")" "$HOMEDIR/proj9" kfr-cccc-0092
+has "connected" "connected."
+check "nor by a connect" 'grep -q "^VERSION=0.3.9$" "$SW/snapwork-watch.sh" && grep -q "watcher-kept version=0.3.9" "$SW/plugin.log"'
+set_watch_version 0.3.7
 
 echo "== 9. logs keep no keys, codes or invitations"
 unix && check "watch log mode 600" '[ "$(ls -l "$SW/watch.log" | cut -c 1-10)" = "-rw-------" ]'

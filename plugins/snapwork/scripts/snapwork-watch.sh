@@ -12,10 +12,20 @@
 # and the watcher starts a fresh background chat in that folder (no copy), so no room's talk
 # comes along.
 #
-# What it never does: run anything but the one fork (or fresh-chat) command, from a home this computer
+# Coming back (7.5): a "revive" line names a chat on this computer that is in a room (by the room's
+# id and the agent's id) whose person wants it back, because a message waits for it or they clicked
+# "Bring it back". The watcher finds the chat in its own saved connection (rooms/<space>.<agent>.json:
+# the session id and the folder), checks that it is not running, and resumes it in the background
+# with a fixed prompt. It tells SnapWork the session id, or why not in a fixed word (no_runtime,
+# not_trusted, chat_gone, busy, start_failed). The plugin's own hooks make it listen again.
+#
+# What it never does: run anything but the one fork (or fresh-chat, or resume) command (and
+# `claude stop` on a copy a resume made by mistake), from a home this computer
 # registered (homes/<id>.json, written by the plugin when the person connected the chat), in that
 # chat's own folder as recorded here (never a folder the gateway names), with the invitation as
-# the only prompt. It never forks a chat that is in a space. The computer key goes to curl through
+# the only prompt. It never forks a chat that is in a space. A resume takes only ids and a label
+# from SnapWork: the chat and its folder come from this computer's files, the prompt is fixed here,
+# and it resumes only a chat that is not running. The computer key goes to curl through
 # its config on stdin, never on a command line, and is never logged; neither are invitations.
 #
 # Exits 0 (and the service stays down) when SnapWork refuses the key: the computer was
@@ -30,7 +40,7 @@ set -u
 GATEWAY=https://space.snapwork.ai
 # The same gateway's new main address: its invitations are accepted too (room_word_and_address).
 ALT_GATEWAY=https://room.snapwork.ai
-VERSION=0.3.2
+VERSION=0.3.7
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
@@ -43,6 +53,13 @@ LOG_MAX_BYTES=65536
 LOG_KEEP_LINES=200
 BACKOFF_MAX_S=300
 TAB=$(printf '\t')
+# The only prompt a chat brought back gets. Never text from SnapWork.
+REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
+# A chat whose transcript changed this recently may still be running: it is not started again.
+BUSY_MINUTES=3
+# Touched while the watcher starts a chat (and just after): the plugin does not restart the watcher
+# then (snapwork-connect.sh refresh_watcher).
+STARTING=$SNAPWORK_HOME/watch.starting
 
 case $WAIT in '' | *[!0-9]*) WAIT=30 ;; esac
 
@@ -89,17 +106,27 @@ take_lock() {
   (umask 077 && printf '%s' "$$" > "$LOCK")
 }
 
-# report <add id> <json body>: tells SnapWork how the fork went (best effort, logged).
-report() {
+# send <path> <json body>: one answer to SnapWork under /computer/ (best effort); sets status.
+send() {
   key=$(field key "$COMPUTER_FILE")
   status=$(printf 'header = "Authorization: Bearer %s"\n' "$key" \
     | curl -q -K - -sS --proto =https --max-time 15 -o /dev/null -w '%{http_code}' -X POST \
-      -H 'content-type: application/json' --data-binary "$2" "$GATEWAY/computer/work/$1" 2> /dev/null) \
+      -H 'content-type: application/json' --data-binary "$2" "$GATEWAY/computer/$1" 2> /dev/null) \
     || status=000
   key=
-  wlog "report add=$(short "$1") status=$status"
 }
+# report <add id> <json body>: tells SnapWork how the fork went (logged).
+report() { send "work/$1" "$2"; wlog "report add=$(short "$1") status=$status"; }
 failed() { report "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed add=$(short "$1") why=$2"; }
+# revived <revive id> <json body>: tells SnapWork how bringing a chat back went (logged).
+revived() { send "revivals/$1" "$2"; wlog "report revive=$(short "$1") status=$status"; }
+not_revived() { revived "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed revive=$(short "$1") why=$2"; }
+
+# A room's name as SnapWork sent it, safe as one argument: anything a shell or a flag would read
+# makes it "SnapWork".
+safe_label() {
+  case $1 in '' | -* | *[\"\'\`\$\\\;\&\|\<\>\(\)\{\}\*\?\[\]\~\#!]* | *[[:cntrl:]]*) printf 'SnapWork' ;; *) printf '%s' "$1" ;; esac
+}
 
 # home_file <id> <kind>: the home this computer registered, or nothing. A chat home names its
 # session; a folder home (7.6) says "kind": "folder" and names itself, and has no session.
@@ -124,27 +151,44 @@ in_a_space() {
   return 1
 }
 
+# runner_of: claude as the home in HOME_FILE recorded it (its command and its chat's PATH), else
+# claude on this PATH; sets runner (absolute, or empty) and chat_path.
+runner_of() {
+  runner=$(field runner "$HOME_FILE")
+  { [ -n "$runner" ] && [ -x "$runner" ]; } || runner=$(command -v claude 2> /dev/null)
+  case $runner in /*) [ -x "$runner" ] || runner= ;; *) runner= ;; esac
+  # Only absolute folders: an empty or relative entry would look tools up in the project folder.
+  chat_path=$(field path "$HOME_FILE" | tr ':' '\n' | grep '^/' | paste -s -d ':' -)
+}
+# The short id --bg prints ("backgrounded · 1a2b3c4d · ...").
+bg_id() { printf '%s' "$1" | sed -n 's/.*backgrounded[^0-9a-f]*\([0-9a-f]\{8\}\).*/\1/p' | head -n 1; }
+# full_id <short id>: the full session id from Claude's list of sessions, or nothing.
+full_id() {
+  PATH=${chat_path:-$PATH} "$runner" agents --json 2> /dev/null < /dev/null \
+    | grep -o "\"sessionId\"[[:space:]]*:[[:space:]]*\"$1[0-9a-f-]*\"" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'
+}
+# mark_starting: the watcher is starting a chat now (never through a link).
+mark_starting() { [ -L "$STARTING" ] || (umask 077 && touch "$STARTING") 2> /dev/null; }
+
 # start_claude <add> <home> <project> <invitation> <name> <kind>: a chat home is copied
 # (--resume <home> --fork-session); a folder home gets a fresh chat in its folder (no --resume), so
 # no room's talk ever comes along.
 start_claude() {
-  runner=$(field runner "$HOME_FILE")
-  { [ -n "$runner" ] && [ -x "$runner" ]; } || runner=$(command -v claude 2> /dev/null)
-  case $runner in /*) [ -x "$runner" ] || runner= ;; *) runner= ;; esac
+  runner_of
   [ -n "$runner" ] || { failed "$1" no_runtime; return 0; }
-  # Only absolute folders: an empty or relative entry would look tools up in the project folder.
-  chat_path=$(field path "$HOME_FILE" | tr ':' '\n' | grep '^/' | paste -s -d ':' -)
+  mark_starting
+  # stdin is the list of work: never handed to claude.
   if [ "$6" = folder ]; then
-    out=$(cd "$3" && PATH=${chat_path:-$PATH} "$runner" --bg --name "$5" "$4" 2>&1)
+    out=$(cd "$3" && PATH=${chat_path:-$PATH} "$runner" --bg --name "$5" "$4" 2>&1 < /dev/null)
   else
-    out=$(cd "$3" && PATH=${chat_path:-$PATH} "$runner" --resume "$2" --fork-session --bg --name "$5" "$4" 2>&1)
+    out=$(cd "$3" && PATH=${chat_path:-$PATH} "$runner" --resume "$2" --fork-session --bg --name "$5" "$4" 2>&1 < /dev/null)
   fi
+  mark_starting
   case $out in *"not trusted"*) failed "$1" not_trusted; return 0 ;; esac
-  id8=$(printf '%s' "$out" | sed -n 's/.*backgrounded[^0-9a-f]*\([0-9a-f]\{8\}\).*/\1/p' | head -n 1)
+  id8=$(bg_id "$out")
   [ -n "$id8" ] || { failed "$1" fork_failed; return 0; }
   # --bg prints the short id; the full one is in the list of sessions.
-  full=$(PATH=${chat_path:-$PATH} "$runner" agents --json 2> /dev/null \
-    | grep -o "\"sessionId\"[[:space:]]*:[[:space:]]*\"$id8[0-9a-f-]*\"" | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+  full=$(full_id "$id8")
   if valid_uuid "$full"; then
     report "$1" "{\"state\":\"started\",\"session_id\":\"$full\"}"
     wlog "started add=$(short "$1") session=$id8"
@@ -158,6 +202,7 @@ start_claude() {
 # "chat" or "folder"; a line without it (an older gateway) is a chat.
 start_one() {
   valid_uuid "$1" || { wlog "bad-item"; return 0; }
+  mark_starting
   kind=${6:-chat}
   case $kind in chat | folder) ;; *) wlog "bad-item add=$(short "$1")"; return 0 ;; esac
   valid_uuid "$3" || { failed "$1" home_gone; return 0; }
@@ -167,8 +212,7 @@ start_one() {
     *) code= ;;
   esac
   case $code in '' | *[!A-Za-z0-9_-]*) wlog "bad-item add=$(short "$1")"; return 0 ;; esac
-  name=$5
-  case $name in '' | -* | *[\"\'\`\$\\\;\&\|\<\>\(\)\{\}\*\?\[\]\~\#!]*) name=SnapWork ;; esac
+  name=$(safe_label "$5")
   home_file "$3" "$kind" || { failed "$1" home_gone; return 0; }
   project=$(field project "$HOME_FILE")
   case $project in /*) ;; *) failed "$1" home_gone; return 0 ;; esac
@@ -182,6 +226,111 @@ start_one() {
     claude-code) start_claude "$1" "$3" "$project" "$4" "$name" "$kind" ;;
     *) failed "$1" no_runtime ;;
   esac
+}
+
+# ---- coming back (7.5) ----
+
+# room_state <space> <agent>: this agent's saved connection in that space (rooms/<space>.<agent>.json,
+# or the room-only rooms/<space>.json when it names that agent), never a link; sets ROOM_STATE.
+ROOM_STATE=
+room_state() {
+  ROOM_STATE=$ROOMS/$1.$2.json
+  if [ ! -e "$ROOM_STATE" ] && [ ! -L "$ROOM_STATE" ]; then
+    ROOM_STATE=$ROOMS/$1.json
+    [ "$(field agentId "$ROOM_STATE")" = "$2" ] || return 1
+  fi
+  { [ -f "$ROOM_STATE" ] && [ ! -L "$ROOM_STATE" ]; } || return 1
+  saved_room=$(field roomId "$ROOM_STATE")
+  [ -z "$saved_room" ] || [ "$saved_room" = "$1" ]
+}
+
+# revive_home <project>: the home this computer registered for that folder (its claude command and
+# PATH), else any home here (the same claude), else none; sets HOME_FILE.
+revive_home() {
+  HOME_FILE=
+  for h in "$HOMES"/*.json; do
+    { [ -f "$h" ] && [ ! -L "$h" ]; } || continue
+    [ -n "$HOME_FILE" ] || HOME_FILE=$h
+    [ "$(field project "$h")" = "$1" ] || continue
+    HOME_FILE=$h
+    return 0
+  done
+  return 0
+}
+
+# running <space> <session>: the chat runs now: its listener holds the lock, a process names it (a
+# claude --resume in a terminal), Claude lists it, or its transcript changed in the last
+# BUSY_MINUTES. Needs runner and chat_path.
+running() {
+  lock=${ROOM_STATE%.json}.listener
+  if [ -f "$lock" ] && [ ! -L "$lock" ]; then
+    pid=$(sed -n '1s/ .*//p' "$lock" 2> /dev/null | tr -d '\r\n ')
+    case $pid in
+      '' | *[!0-9]* | 0*) ;;
+      *)
+        case "$(ps -p "$pid" -o args= 2> /dev/null) " in
+          *snapwork-hook.sh*" --room $1 "*) wlog "busy why=listener"; return 0 ;;
+        esac ;;
+    esac
+  fi
+  # Where ps cannot list every process (Windows), the other checks still count.
+  if procs=$(ps -A -o args= 2> /dev/null); then
+    case $procs in *"$2"*) wlog "busy why=process"; return 0 ;; esac
+  fi
+  if PATH=${chat_path:-$PATH} "$runner" agents --json 2> /dev/null < /dev/null \
+    | grep -q "\"sessionId\"[[:space:]]*:[[:space:]]*\"$2\""; then
+    wlog "busy why=listed"
+    return 0
+  fi
+  for t in "${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}"/projects/*/"$2".jsonl; do
+    { [ -f "$t" ] && [ ! -L "$t" ]; } || continue
+    [ -z "$(find "$t" -prune -mmin "-$BUSY_MINUTES" 2> /dev/null)" ] || { wlog "busy why=transcript"; return 0; }
+  done
+  return 1
+}
+
+# revive_one <revive> <runtime> <space> <agent> <label>: one revive line. Resumes the chat this
+# computer saved for that agent, in its own folder, with the fixed prompt; nothing else from
+# SnapWork reaches the command but the checked label.
+revive_one() {
+  valid_uuid "$1" || { wlog "bad-item"; return 0; }
+  mark_starting
+  { valid_uuid "$3" && valid_uuid "$4"; } || { wlog "bad-item revive=$(short "$1")"; not_revived "$1" chat_gone; return 0; }
+  label=$(safe_label "$5")
+  room_state "$3" "$4" || { wlog "no-connection revive=$(short "$1")"; not_revived "$1" chat_gone; return 0; }
+  session=$(field session "$ROOM_STATE" | tr 'A-F' 'a-f')
+  valid_uuid "$session" || { not_revived "$1" chat_gone; return 0; }
+  project=$(field project "$ROOM_STATE")
+  case $project in /*) ;; *) not_revived "$1" chat_gone; return 0 ;; esac
+  [ -d "$project" ] || { not_revived "$1" chat_gone; return 0; }
+  [ "$2" = claude-code ] || { not_revived "$1" no_runtime; return 0; }
+  case $(field app "$ROOM_STATE") in '' | claude) ;; *) not_revived "$1" no_runtime; return 0 ;; esac
+  revive_home "$project"
+  runner_of
+  [ -n "$runner" ] || { not_revived "$1" no_runtime; return 0; }
+  if running "$3" "$session"; then not_revived "$1" busy; return 0; fi
+  wlog "revive id=$(short "$1") session=$(short "$session")"
+  out=$(cd "$project" && PATH=${chat_path:-$PATH} "$runner" --resume "$session" --bg --name "$label" "$REVIVE_PROMPT" 2>&1 < /dev/null)
+  mark_starting
+  case $out in *"not trusted"*) not_revived "$1" not_trusted; return 0 ;; esac
+  id8=$(bg_id "$out")
+  [ -n "$id8" ] || { not_revived "$1" start_failed; return 0; }
+  # --resume --bg keeps the chat's id; a different one is a copy, made because it was running. The
+  # copy is stopped (its conversation is kept by Claude), never the chat itself.
+  if [ "$id8" != "$(short "$session")" ]; then
+    wlog "copy-started revive=$(short "$1") session=$id8"
+    copy=$(full_id "$id8")
+    { valid_uuid "$copy" && [ "$copy" != "$session" ]; } || copy=$id8
+    if PATH=${chat_path:-$PATH} "$runner" stop "$copy" > /dev/null 2>&1 < /dev/null; then
+      wlog "copy-stopped revive=$(short "$1") session=$id8"
+    else
+      wlog "copy-left-running revive=$(short "$1") session=$id8"
+    fi
+    not_revived "$1" busy
+    return 0
+  fi
+  revived "$1" "{\"state\":\"started\",\"session_id\":\"$session\"}"
+  wlog "started revive=$(short "$1") session=$id8"
 }
 
 poll() {
@@ -198,12 +347,16 @@ poll() {
       exit 0 ;;
     *) return 1 ;;
   esac
-  # `|| [ -n "$kind" ]`: a last line without its line break still counts.
-  while IFS=$TAB read -r what add runtime home invitation name homekind || [ -n "${what:-}" ]; do
-    [ "$what" = start ] || continue
-    # A tab left in the last field (a line with more fields than this watcher knows) is not a name.
-    case $homekind in *"$TAB"*) homekind=${homekind%%"$TAB"*} ;; esac
-    start_one "$add" "$runtime" "$home" "$invitation" "$name" "$homekind"
+  # start <add> <runtime> <home> <invitation> <name> [<kind>]
+  # revive <revive> <runtime> <space> <agent> <label>     (7.5; only to a watcher at 0.3.7 or later)
+  # Any other first word is skipped. `|| [ -n "$what" ]`: a last line without its line break counts.
+  while IFS=$TAB read -r what id runtime f3 f4 f5 f6 || [ -n "${what:-}" ]; do
+    # A tab left in the last field (a line with more fields than this watcher knows) is dropped.
+    case $f6 in *"$TAB"*) f6=${f6%%"$TAB"*} ;; esac
+    case $what in
+      start) start_one "$id" "$runtime" "$f3" "$f4" "$f5" "$f6" ;;
+      revive) revive_one "$id" "$runtime" "$f3" "$f4" "$f5" ;;
+    esac
   done < "$WORK/work"
   return 0
 }

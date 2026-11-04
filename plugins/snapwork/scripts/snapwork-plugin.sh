@@ -781,6 +781,9 @@ on_prompt() {
 }
 
 on_start() {
+  # A connected computer runs the watcher copied at connect: after an update it gets this
+  # plugin's copy (and restarts), so a new watcher (0.3.7 brings chats back) arrives by itself.
+  refresh_watcher_on_start
   if [ "$SRC" = fork ] && [ -n "$MARKER" ] && [ -d "$SNAPWORK_HOME" ]; then
     FORK=1
     (umask 077 && mkdir -p "$SESSIONS" && [ ! -L "$MARKER" ] && printf 'fork %s\n' "$PARENT" > "$MARKER") 2> /dev/null

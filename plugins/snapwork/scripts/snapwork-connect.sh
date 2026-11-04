@@ -39,9 +39,15 @@ CONNECT_URL=$GATEWAY/c/
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
 WATCH_SCRIPT=$SNAPWORK_HOME/snapwork-watch.sh
-WATCH_VERSION=0.3.2
+WATCH_VERSION=0.3.7
 WATCH_LABEL=ai.snapwork.watch
 WATCH_NOTE=
+# The watcher touches this while it starts a chat (and just after): no restart then.
+WATCH_STARTING=$SNAPWORK_HOME/watch.starting
+WATCH_STARTING_MINUTES=5
+# A chat's start brings the watcher up to date at most once an hour.
+WATCH_REFRESH_STAMP=$SNAPWORK_HOME/watch-refresh.stamp
+WATCH_REFRESH_MINUTES=60
 PENDING=$SNAPWORK_HOME/connect-pending
 CONFIRM_SECONDS=600
 
@@ -233,13 +239,53 @@ claim_state() {
   return 0
 }
 
+# version_lt <a> <b>: true when version a is lower than b (dotted numbers; a part that is not a
+# short number counts as 0, so an unreadable version is the lowest).
+version_lt() {
+  va=$1
+  vb=$2
+  for _ in 1 2 3 4; do
+    pa=${va%%.*}
+    pb=${vb%%.*}
+    case $pa in '' | *[!0-9]* | ??????????*) pa=0 ;; esac
+    case $pb in '' | *[!0-9]* | ??????????*) pb=0 ;; esac
+    [ "$pa" -lt "$pb" ] && return 0
+    [ "$pa" -gt "$pb" ] && return 1
+    case $va in *.*) va=${va#*.} ;; *) va= ;; esac
+    case $vb in *.*) vb=${vb#*.} ;; *) vb= ;; esac
+  done
+  return 1
+}
+installed_watch_version() { sed -n 's/^VERSION=//p' "$WATCH_SCRIPT" 2> /dev/null | head -n 1; }
+# fresh <file> <minutes>: the file is there (not a link) and changed in the last minutes.
+fresh() { [ -f "$1" ] && [ ! -L "$1" ] && [ -n "$(find "$1" -mmin "-$2" 2> /dev/null)" ]; }
+
 # refresh_watcher: a computer connected with an older plugin still runs that watcher's copy, which
-# cannot start a folder home: after a claim, put this plugin's watcher in its place (and restart it).
+# cannot start a folder home or bring a chat back: after a claim, and when a chat starts, put this
+# plugin's watcher in its place (and restart it). Only to a newer version (Claude's and Codex's
+# plugins share ~/.snapwork and may be at different versions: never back), and never while the
+# watcher starts a chat. Sets WATCH_REFRESHED=1 when it did.
+WATCH_REFRESHED=0
 refresh_watcher() {
   [ -f "$WATCH_SCRIPT" ] && [ ! -L "$WATCH_SCRIPT" ] || return 0
-  [ "$(sed -n 's/^VERSION=//p' "$WATCH_SCRIPT" | head -n 1)" != "$WATCH_VERSION" ] || return 0
+  version_lt "$(installed_watch_version)" "$WATCH_VERSION" || return 0
+  if fresh "$WATCH_STARTING" "$WATCH_STARTING_MINUTES"; then plog "watcher-refresh-later why=starting"; return 0; fi
   install_watcher
+  WATCH_REFRESHED=1
   plog "watcher-refreshed to=$WATCH_VERSION note=$WATCH_NOTE"
+}
+
+# refresh_watcher_on_start: a chat's start on a connected computer (SessionStart). Not from a copy
+# (/fork, or one the watcher started), and at most once an hour.
+refresh_watcher_on_start() {
+  [ -f "$COMPUTER_FILE" ] && [ ! -L "$COMPUTER_FILE" ] || return 0
+  [ "$FORK" -eq 0 ] && [ "$SRC" != fork ] || return 0
+  [ ! -L "$WATCH_REFRESH_STAMP" ] || return 0
+  ! fresh "$WATCH_REFRESH_STAMP" "$WATCH_REFRESH_MINUTES" || return 0
+  refresh_watcher
+  [ "$WATCH_REFRESHED" -eq 1 ] || return 0
+  (umask 077 && touch "$WATCH_REFRESH_STAMP") 2> /dev/null
+  return 0
 }
 
 # claim_all: after a connect, the chats on this computer that are already in rooms, once each.
@@ -366,8 +412,13 @@ EOF
 install_watcher() {
   src=$HERE/snapwork-watch.sh
   if [ ! -f "$src" ] || [ -L "$WATCH_SCRIPT" ]; then WATCH_NOTE=failed; return 0; fi
-  (umask 077 && cp "$src" "$WATCH_SCRIPT.$$" && chmod 700 "$WATCH_SCRIPT.$$" && mv "$WATCH_SCRIPT.$$" "$WATCH_SCRIPT") \
-    || { WATCH_NOTE=failed; return 0; }
+  # A newer copy (from the other app's plugin) is kept; only the service is set up again.
+  if [ -f "$WATCH_SCRIPT" ] && version_lt "$WATCH_VERSION" "$(installed_watch_version)"; then
+    plog "watcher-kept version=$(installed_watch_version | tr -cd '0-9.' | cut -c 1-20)"
+  else
+    (umask 077 && cp "$src" "$WATCH_SCRIPT.$$" && chmod 700 "$WATCH_SCRIPT.$$" && mv "$WATCH_SCRIPT.$$" "$WATCH_SCRIPT") \
+      || { WATCH_NOTE=failed; return 0; }
+  fi
   case ${SNAPWORK_WATCH_SERVICE:-$(uname -s 2> /dev/null)} in
     test) WATCH_NOTE=test; return 0 ;;
     Darwin) if install_launchd; then WATCH_NOTE=service; return 0; fi ;;
