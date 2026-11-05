@@ -39,7 +39,7 @@ CONNECT_URL=$GATEWAY/c/
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
 WATCH_SCRIPT=$SNAPWORK_HOME/snapwork-watch.sh
-WATCH_VERSION=0.3.7
+WATCH_VERSION=0.3.10
 WATCH_LABEL=ai.snapwork.watch
 WATCH_NOTE=
 # The watcher touches this while it starts a chat (and just after): no restart then.
@@ -74,9 +74,10 @@ runner_path() {
   printf '%s' "$r"
 }
 
-# A claimed folder home is started with Claude Code's own command, whatever app connected (M7.6).
+# claim_runner <claude|codex>: a claimed folder home is started or brought back with its own
+# app's command, whatever app's chat connected the computer (M7.6; Codex: 2026-11-05).
 claim_runner() {
-  (APP=claude && runner_path)
+  (APP=$1 && runner_path)
 }
 
 # The chat's PATH with only absolute folders: an empty or relative entry would look tools up in
@@ -186,8 +187,13 @@ claim_state() {
   { [ -f "$COMPUTER_FILE" ] && [ ! -L "$COMPUTER_FILE" ]; } || return 0
   { [ -f "$cl_state" ] && [ ! -L "$cl_state" ]; } || return 0
   [ -z "$(field claimed "$cl_state")" ] || return 0
-  # Claude Code only for now (Codex comes with 7.4); this gateway's connections only.
-  [ "$(app_of "$cl_state")" = claude ] || return 0
+  # Claude Code and Codex chats (codex_comes_back_through_its_daemon); this gateway's only.
+  cl_app=$(app_of "$cl_state")
+  case $cl_app in
+    claude) cl_runtime=claude-code ;;
+    codex) cl_runtime=codex ;;
+    *) return 0 ;;
+  esac
   cl_gw=$(field gateway "$cl_state")
   [ "$cl_gw" = "$GATEWAY" ] || [ "$cl_gw" = "$ALT_GATEWAY" ] || return 0
   cl_project=$(field project "$cl_state")
@@ -205,8 +211,8 @@ claim_state() {
   command -v curl > /dev/null 2>&1 || return 0
   work_dir || return 0
   cl_body=$WORK/claim-body.json
-  (umask 077 && printf '{"agent_key":"%s","home":"%s","folder":"%s","runtime":"claude-code"}' \
-    "$cl_akey" "$cl_home" "$cl_folder" > "$cl_body") || return 0
+  (umask 077 && printf '{"agent_key":"%s","home":"%s","folder":"%s","runtime":"%s"}' \
+    "$cl_akey" "$cl_home" "$cl_folder" "$cl_runtime" > "$cl_body") || return 0
   cl_akey=
   cl_status=$(printf 'header = "Authorization: Bearer %s"\n' "$cl_ckey" \
     | curl -q -K - -sS --proto =https --max-time 15 -o "$WORK/claim.json" -w '%{http_code}' -X POST \
@@ -217,11 +223,15 @@ claim_state() {
   case $cl_status in
     201)
       plog "claim-ok status=201"
-      # The folder home the watcher starts fresh chats from (only the folder; never a chat).
-      [ -f "$HOMES/$cl_home.json" ] || {
+      # The folder home the watcher starts fresh chats from and brings chats back with (only the
+      # folder; never a chat). One per app: a Claude chat and a Codex chat of one folder are two
+      # agents, so Codex's file is <home>.codex.json.
+      cl_home_file=$HOMES/$cl_home.json
+      [ "$cl_app" = claude ] || cl_home_file=$HOMES/$cl_home.$cl_app.json
+      [ -f "$cl_home_file" ] || {
         (umask 077 && mkdir -p "$HOMES") 2> /dev/null
-        write_owner_only "$HOMES/$cl_home.json" "$(printf '{\n  "kind": "folder",\n  "home": "%s",\n  "app": "claude",\n  "project": "%s",\n  "runner": "%s",\n  "path": "%s"\n}\n' \
-          "$cl_home" "$cl_project" "$(claim_runner)" "$(absolute_path)")" || plog "claim-home-not-saved"
+        write_owner_only "$cl_home_file" "$(printf '{\n  "kind": "folder",\n  "home": "%s",\n  "app": "%s",\n  "project": "%s",\n  "runner": "%s",\n  "path": "%s"\n}\n' \
+          "$cl_home" "$cl_app" "$cl_project" "$(claim_runner "$cl_app")" "$(absolute_path)")" || plog "claim-home-not-saved"
       }
       set_line "$cl_state" claimed "$cl_home" || true
       refresh_watcher ;;
@@ -230,7 +240,7 @@ claim_state() {
       plog "claim-already status=200"
       set_line "$cl_state" claimed "$cl_home" || true ;;
     404 | 409 | 422)
-      # Final answers: not this person's to claim, or not a Claude Code agent. Never asked again.
+      # Final answers: not this person's to claim, or not an app SnapWork claims. Never asked again.
       plog "claim-refused status=$cl_status"
       set_line "$cl_state" claimed refused || true ;;
     *)
@@ -347,6 +357,9 @@ ask_to_confirm() {
 
 xml_escape() { printf '%s' "$1" | sed 's/&/\&amp;/g;s/</\&lt;/g;s/>/\&gt;/g'; }
 
+# Both service files leave the chats the watcher started running when the watcher itself stops or
+# restarts (launchd AbandonProcessGroup, systemd KillMode=process): a Codex chat it brought back
+# runs as its child (codex_comes_back_through_its_daemon), a Claude one under Claude's own service.
 install_launchd() {
   agents=$HOME/Library/LaunchAgents
   plist=$agents/$WATCH_LABEL.plist
@@ -369,6 +382,7 @@ install_launchd() {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ThrottleInterval</key><integer>30</integer>
+  <key>AbandonProcessGroup</key><true/>
 </dict>
 </plist>
 EOF
@@ -396,6 +410,7 @@ Environment="SNAPWORK_HOME=$SNAPWORK_HOME"
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Restart=on-failure
 RestartSec=30
+KillMode=process
 
 [Install]
 WantedBy=default.target

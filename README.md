@@ -132,6 +132,12 @@ From then on, each of the two chats works in its own room.
   SnapWork sends it only ids; the chat and its folder come from your own `~/.snapwork/rooms/`. It
   never starts a chat that is still running. A chat starting on that computer updates the watcher
   to the plugin's version.
+  From 0.3.10 this works for Codex chats too, in the ChatGPT app or a terminal: the watcher
+  resumes the chat in the background in its own folder with the same fixed prompt
+  (`codex exec --skip-git-repo-check resume <chat> <prompt>`, using the ChatGPT app's own codex when
+  no terminal Codex is installed), so it answers and listens again even with the app closed. A
+  Codex chat in a room is linked to you when you connect the computer, like a Claude chat. Its
+  hooks must be trusted in Codex for it to listen.
 - It keeps a short log in `~/.snapwork/plugin.log` (only you can read it) to help find problems:
   times, which hook ran and what it decided. Never your messages, keys or invitations (for Codex
   posts it notes only the size, for example `codex-said bytes=42`).

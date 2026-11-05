@@ -18,6 +18,10 @@
 # the session id and the folder), checks that it is not running, and resumes it in the background
 # with a fixed prompt. It tells SnapWork the session id, or why not in a fixed word (no_runtime,
 # not_trusted, chat_gone, busy, start_failed). The plugin's own hooks make it listen again.
+# A Codex chat (0.3.10, codex_comes_back_through_its_daemon) is resumed headless in its own
+# folder, `codex exec --skip-git-repo-check resume <chat> <the fixed prompt>` (the ChatGPT app makes
+# each chat a folder that is no git repository), in the background: it answers, then its listener
+# waits for the room. The app's own codex is used when there is no terminal one.
 #
 # What it never does: run anything but the one fork (or fresh-chat, or resume) command (and
 # `claude stop` on a copy a resume made by mistake), from a home this computer
@@ -40,7 +44,7 @@ set -u
 GATEWAY=https://space.snapwork.ai
 # The same gateway's new main address: its invitations are accepted too (room_word_and_address).
 ALT_GATEWAY=https://room.snapwork.ai
-VERSION=0.3.7
+VERSION=0.3.10
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
@@ -57,6 +61,12 @@ TAB=$(printf '\t')
 REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
 # A chat whose transcript changed this recently may still be running: it is not started again.
 BUSY_MINUTES=3
+# A Codex chat brought back runs on (its listener waits for the room). The watcher watches its
+# first seconds only: an exit then is a failure it can name; still running is started.
+CODEX_START_S=${SNAPWORK_CODEX_START_S:-15}
+case $CODEX_START_S in '' | *[!0-9]*) CODEX_START_S=15 ;; esac
+# The ChatGPT app carries its own codex: on a Mac with no terminal Codex, that one brings chats back.
+CHATGPT_APP=${SNAPWORK_CHATGPT_APP:-/Applications/ChatGPT.app}
 # Touched while the watcher starts a chat (and just after): the plugin does not restart the watcher
 # then (snapwork-connect.sh refresh_watcher).
 STARTING=$SNAPWORK_HOME/watch.starting
@@ -84,6 +94,8 @@ field() {
 valid_uuid() {
   case $1 in ????????-????-????-????-????????????) ;; *) return 1 ;; esac
   case $1 in *[!0-9a-fA-F-]*) return 1 ;; esac
+  # Hex where a uuid has hex: an id goes after --thread or --resume, never read as a flag.
+  case $1 in *[!0-9a-fA-F]*-*-*-*-* | *-*[!0-9a-fA-F]*-*-*-* | *-*-*[!0-9a-fA-F]*-*-* | *-*-*-*[!0-9a-fA-F]*-* | *-*-*-*-*[!0-9a-fA-F]*) return 1 ;; esac
 }
 short() { printf '%s' "$1" | cut -c 1-8; }
 
@@ -155,7 +167,11 @@ in_a_space() {
 # claude on this PATH; sets runner (absolute, or empty) and chat_path.
 runner_of() {
   runner=$(field runner "$HOME_FILE")
-  { [ -n "$runner" ] && [ -x "$runner" ]; } || runner=$(command -v claude 2> /dev/null)
+  { [ -n "$runner" ] && [ -x "$runner" ]; } || runner=$(command -v "${1:-claude}" 2> /dev/null)
+  if [ -z "$runner" ] && [ "${1:-}" = codex ]; then
+    app_codex=$CHATGPT_APP/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex
+    [ ! -x "$app_codex" ] || runner=$app_codex
+  fi
   case $runner in /*) [ -x "$runner" ] || runner= ;; *) runner= ;; esac
   # Only absolute folders: an empty or relative entry would look tools up in the project folder.
   chat_path=$(field path "$HOME_FILE" | tr ':' '\n' | grep '^/' | paste -s -d ':' -)
@@ -244,12 +260,15 @@ room_state() {
   [ -z "$saved_room" ] || [ "$saved_room" = "$1" ]
 }
 
-# revive_home <project>: the home this computer registered for that folder (its claude command and
-# PATH), else any home here (the same claude), else none; sets HOME_FILE.
+# revive_home <project> <claude|codex>: the home this computer registered for that folder and app
+# (its command and PATH), else any home here of that app (the same command), else none; sets
+# HOME_FILE. A home that names no app is Claude's (homes saved before 0.3.10's Codex claims).
 revive_home() {
   HOME_FILE=
   for h in "$HOMES"/*.json; do
     { [ -f "$h" ] && [ ! -L "$h" ]; } || continue
+    rh_app=$(field app "$h")
+    [ "${rh_app:-claude}" = "$2" ] || continue
     [ -n "$HOME_FILE" ] || HOME_FILE=$h
     [ "$(field project "$h")" = "$1" ] || continue
     HOME_FILE=$h
@@ -258,9 +277,9 @@ revive_home() {
   return 0
 }
 
-# running <space> <session>: the chat runs now: its listener holds the lock, a process names it (a
-# claude --resume in a terminal), Claude lists it, or its transcript changed in the last
-# BUSY_MINUTES. Needs runner and chat_path.
+# running <space> <session> <claude|codex>: the chat runs now: its listener holds the lock, a
+# process names it (a claude --resume or codex resume in a terminal), Claude lists it, or its
+# transcript changed in the last BUSY_MINUTES. Needs runner and chat_path.
 running() {
   lock=${ROOM_STATE%.json}.listener
   if [ -f "$lock" ] && [ ! -L "$lock" ]; then
@@ -276,6 +295,14 @@ running() {
   # Where ps cannot list every process (Windows), the other checks still count.
   if procs=$(ps -A -o args= 2> /dev/null); then
     case $procs in *"$2"*) wlog "busy why=process"; return 0 ;; esac
+  fi
+  if [ "$3" = codex ]; then
+    # Codex keeps a chat in sessions/<year>/<month>/<day>/rollout-<time>-<id>.jsonl.
+    for t in "${CODEX_HOME:-${HOME:-}/.codex}"/sessions/*/*/*/rollout-*-"$2".jsonl; do
+      { [ -f "$t" ] && [ ! -L "$t" ]; } || continue
+      [ -z "$(find "$t" -prune -mmin "-$BUSY_MINUTES" 2> /dev/null)" ] || { wlog "busy why=transcript"; return 0; }
+    done
+    return 1
   fi
   if PATH=${chat_path:-$PATH} "$runner" agents --json 2> /dev/null < /dev/null \
     | grep -q "\"sessionId\"[[:space:]]*:[[:space:]]*\"$2\""; then
@@ -303,13 +330,25 @@ revive_one() {
   project=$(field project "$ROOM_STATE")
   case $project in /*) ;; *) not_revived "$1" chat_gone; return 0 ;; esac
   [ -d "$project" ] || { not_revived "$1" chat_gone; return 0; }
-  [ "$2" = claude-code ] || { not_revived "$1" no_runtime; return 0; }
-  case $(field app "$ROOM_STATE") in '' | claude) ;; *) not_revived "$1" no_runtime; return 0 ;; esac
-  revive_home "$project"
-  runner_of
+  # Never the whole disk or the home folder: a chat in a room has its own folder, and Codex starts
+  # without its git-repository guard here (claims already refuse the home folder).
+  real=$(cd "$project" 2> /dev/null && pwd -P) || real=
+  home_real=$(cd "${HOME:-/}" 2> /dev/null && pwd -P) || home_real=/
+  case $real in '' | / | "$home_real") not_revived "$1" chat_gone; return 0 ;; esac
+  # The app SnapWork names must be the one this computer saved the chat as.
+  case $2 in
+    claude-code) app=claude ;;
+    codex) app=codex ;;
+    *) not_revived "$1" no_runtime; return 0 ;;
+  esac
+  saved_app=$(field app "$ROOM_STATE")
+  [ "${saved_app:-claude}" = "$app" ] || { not_revived "$1" no_runtime; return 0; }
+  revive_home "$project" "$app"
+  runner_of "$app"
   [ -n "$runner" ] || { not_revived "$1" no_runtime; return 0; }
-  if running "$3" "$session"; then not_revived "$1" busy; return 0; fi
+  if running "$3" "$session" "$app"; then not_revived "$1" busy; return 0; fi
   wlog "revive id=$(short "$1") session=$(short "$session")"
+  if [ "$app" = codex ]; then revive_codex "$1" "$session" "$project"; return 0; fi
   out=$(cd "$project" && PATH=${chat_path:-$PATH} "$runner" --resume "$session" --bg --name "$label" "$REVIVE_PROMPT" 2>&1 < /dev/null)
   mark_starting
   case $out in *"not trusted"*) not_revived "$1" not_trusted; return 0 ;; esac
@@ -331,6 +370,43 @@ revive_one() {
   fi
   revived "$1" "{\"state\":\"started\",\"session_id\":\"$session\"}"
   wlog "started revive=$(short "$1") session=$id8"
+}
+
+# revive_codex <revive> <session> <project>: resumes the chat headless in its folder with the fixed
+# prompt, in the background (it keeps listening after the watcher reports). What it prints in its
+# first seconds names a failure; the file is removed then, so none of the chat's words stay on disk.
+revive_codex() {
+  mark_starting
+  out_file=$WORK/codex-start.out
+  rm -f "$out_file"
+  (cd "$3" && PATH=${chat_path:-$PATH} exec "$runner" exec --skip-git-repo-check resume "$2" "$REVIVE_PROMPT") \
+    > "$out_file" 2>&1 < /dev/null &
+  cpid=$!
+  waited=0
+  while kill -0 "$cpid" 2> /dev/null && [ "$waited" -lt "$CODEX_START_S" ]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  mark_starting
+  if kill -0 "$cpid" 2> /dev/null; then
+    rm -f "$out_file"
+    revived "$1" "{\"state\":\"started\",\"session_id\":\"$2\"}"
+    wlog "started revive=$(short "$1") session=$(short "$2")"
+    return 0
+  fi
+  wait "$cpid"
+  rc=$?
+  gone=0
+  ! grep -q "no rollout found" "$out_file" 2> /dev/null || gone=1
+  rm -f "$out_file"
+  if [ "$gone" -eq 1 ]; then
+    not_revived "$1" chat_gone
+  elif [ "$rc" -eq 0 ]; then
+    revived "$1" "{\"state\":\"started\",\"session_id\":\"$2\"}"
+    wlog "started revive=$(short "$1") session=$(short "$2") ended=early"
+  else
+    not_revived "$1" start_failed
+  fi
 }
 
 poll() {
