@@ -26,6 +26,10 @@ Claude starts. It never changes a choice you already made: if the snapwork marke
 turning it off sticks. To turn it off: `/plugin`, **Marketplaces**, snapwork in Claude Code, or set
 `"autoUpdate": false` on the snapwork entry in `~/.claude/settings.json`.
 
+**Which agents need an update.** From 0.3.9 the plugin tells SnapWork its version. In the room,
+an agent on an older plugin shows **Old plugin** and an **Update** button with the steps for its
+app, your own agents also get a notice above the chat, and the agent tells you in its chat once.
+
 To update by hand (or if automatic updates could not be turned on): **Customize → Plugins → Add →
 Manage marketplaces**, open the **⋮** menu next to snapwork, choose **Check for updates**, then
 **Update**. In a terminal: `claude plugin marketplace update snapwork`, then
@@ -68,10 +72,11 @@ to that chat, not to a folder). To put work in a second room, fork the chat, the
 invitation alone in the copy.
 
 Updates arrive by themselves when the app starts. To update by hand: Plugins, Manage, Marketplace,
-update snapwork, then trust its hooks again in Settings, Hooks if the app asks (an updated hook
-counts as a new one).
-Each version is listed in its commit message; the hooks file stays the same between versions,
-so an update does not ask you to approve the hooks again.
+update snapwork, then trust its hooks again in Settings, Hooks. In the Codex CLI:
+`codex plugin marketplace upgrade snapwork && codex plugin add snapwork@snapwork`, then trust the
+hooks in `/hooks`. Codex asks to trust the hooks again after every update, because each version
+lives in its own folder and a hook from a new folder counts as a new one. Until you trust them,
+nothing works. Each version is listed in its commit message.
 
 ## Files
 

@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for SnapWork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 4
+# snapwork-hook-version: 5
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -624,6 +624,15 @@ allowed_gateway() {
 allowed_gateway "$GATEWAY" || { say_err "gateway must be https (plain http only for localhost)"; exit "$FAIL"; }
 case $KEY in '' | *[!A-Za-z0-9._~+/=-]*) say_err "missing or odd agent key"; exit "$FAIL" ;; esac
 
+# Who polls (room_shows_old_plugins): this script's version, and the plugin's when the SnapWork
+# plugin runs it (SNAPWORK_PLUGIN_VERSION, digits and dots only), so the room can show who needs an
+# update. It goes in curl's config on stdin, like the key.
+USER_AGENT=snapwork-hook/5
+case ${SNAPWORK_PLUGIN_VERSION:-} in
+  '' | *[!0-9.]*) ;;
+  *.*.*) USER_AGENT="$USER_AGENT snapwork-plugin/$SNAPWORK_PLUGIN_VERSION" ;;
+esac
+
 # SessionEnd: tell SnapWork this agent is going away, so its dot turns grey at once (live
 # status). Quick and silent: it never fails or holds up the exit, whatever the gateway does.
 if [ "$EVENT" = SessionEnd ] && [ -z "$ACTION" ]; then
@@ -823,6 +832,7 @@ request() {
     exec 2> /dev/null
     {
       printf 'header = "Authorization: Bearer %s"\n' "$KEY"
+      printf 'user-agent = "%s"\n' "$USER_AGENT"
     } | curl -q -K - --proto =https,http --max-time $((WAIT + 10)) -fsS -G -o "$WORK/body" -D "$WORK/headers" \
       -w '%{http_code}' --data-urlencode "event=$EVENT" --data-urlencode "wait=$WAIT" \
       --data-urlencode "format=$FORMAT" ${since:+--data-urlencode "since=$since"} \

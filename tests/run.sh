@@ -52,7 +52,7 @@ empty_out() { if [ -s "$T/out" ]; then bad "$1 (wanted no output)" "$(cat "$T/ou
 called() { if grep -q -x -F -e "$2" "$T/fake/calls"; then ok; else bad "$1 (no call: $2)" "$(cat "$T/fake/calls")"; fi; }
 not_called() { if grep -q -x -F -e "$2" "$T/fake/calls"; then bad "$1 (unwanted call: $2)"; else ok; fi; }
 check() { if eval "$2"; then ok; else bad "$1"; fi; }
-reset_calls() { : > "$T/fake/calls"; }
+reset_calls() { : > "$T/fake/calls"; rm -f "$T/fake/ua_last"; }
 state_of() { grep -l -F "\"roomId\": \"$1\"" "$SW"/rooms/*.json 2> /dev/null | head -n 1; }
 session_in() { sed -n 's/^  "session": "\(.*\)",$/\1/p' "$1"; }
 
@@ -212,6 +212,7 @@ echo "== 8. the listener follows the chat"
 reset_calls
 run stop "$(stop "$S1" "$TX1" "$P1")"
 called "original listens for A" "hook $ROOM_A"
+check "its poll names the hook and the plugin version (room_shows_old_plugins)" '[ "$(cat "$T/fake/ua_last")" = "snapwork-hook/5 snapwork-plugin/$(sed -n "s/^PLUGIN_VERSION=//p" "$PLUGIN")" ]'
 not_called "original does not listen for B" "hook $ROOM_B"
 reset_calls
 run stop "$(stop "$S2" "$TX2" "$P1")"
@@ -1218,6 +1219,11 @@ while read -r kname kver ksha; do
 done < "$ROOT/tests/kit-versions"
 check "every kit script has a recorded version" 'grep -q "^snapwork-hook.sh " "$ROOT/tests/kit-versions" && grep -q "^snapwork-files.sh " "$ROOT/tests/kit-versions"'
 check "one sha per version" '[ "$(cut -d " " -f 1,2 "$ROOT/tests/kit-versions" | sort | uniq -d)" = "" ]'
+# The plugin's own version line matches both manifests and the marketplace (it is what the room sees).
+PV=$(sed -n 's/^PLUGIN_VERSION=//p' "$SCRIPTS/snapwork-plugin.sh")
+for manifest in "$ROOT/plugins/snapwork/.claude-plugin/plugin.json" "$ROOT/plugins/snapwork/.codex-plugin/plugin.json" "$ROOT/.claude-plugin/marketplace.json"; do
+  check "PLUGIN_VERSION $PV is the version in ${manifest#"$ROOT/"}" 'grep -q "\"version\": \"$PV\"" "$manifest"'
+done
 
 # Codex's file lines go to snapwork-files.sh (a stand-in here, in a copy of the scripts)
 mkdir -p "$T/plug"
