@@ -162,6 +162,15 @@ plog() {
   return 0
 }
 
+# Codex runs codex-hooks.json, which passes "codex". A ChatGPT app that ran hooks/hooks.json too
+# (seen 2026-11-04) joined a Codex chat as "Claude" and held it with a Claude Stop hook. Codex sets
+# PLUGIN_ROOT to the same path as CLAUDE_PLUGIN_ROOT; Claude Code sets only CLAUDE_PLUGIN_ROOT. So the
+# Claude hooks step aside under Codex and leave the work to the Codex ones.
+if [ "$APP" = claude ] && [ -n "${PLUGIN_ROOT:-}" ] && [ "$PLUGIN_ROOT" = "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  plog "claude-hooks-under-codex"
+  exit 0
+fi
+
 # ---- is this chat a copy (/fork, /branch, --fork-session)? ----
 # Three signals, any one is enough:
 # - Claude Code's SessionStart source "fork" leaves a marker (sessions/<id>: "fork <original id>").

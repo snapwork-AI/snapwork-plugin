@@ -662,6 +662,32 @@ check "the Claude hooks.json is not Codex" '! grep -q codex "$ROOT/plugins/snapw
 check "keys never on a command line (Codex too)" '! grep -q KEY-IN-ARGV "$T/fake/calls"'
 check "the log never holds a block" '! grep -q "Hi \|hello\|pwned" "$SW/plugin.log"'
 
+echo "== 19b. Codex never runs the Claude hooks (a ChatGPT app that also loaded hooks/hooks.json)"
+# Codex sets PLUGIN_ROOT and the same CLAUDE_PLUGIN_ROOT; Claude Code sets only CLAUDE_PLUGIN_ROOT.
+CX9=99999999-cccc-4000-8000-000000000099
+P9=$HOMEDIR/proj9
+mkdir -p "$P9"
+reset_calls
+rm -f "$T/fake/join_body"
+printf '%s' "$(cx_prompt "$CX9" "$(transcript "$CX9")" "$P9" "${LINK}kfr-gggg-0001")" | env HOME="$HOMEDIR" SNAPWORK_HOME="$SW" \
+  PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" PLUGIN_ROOT=/plugins/snapwork CLAUDE_PLUGIN_ROOT=/plugins/snapwork \
+  SNAPWORK_LISTEN_SECONDS=0 ${TEST_SH:-sh} "$PLUGIN" prompt > "$T/out" 2> "$T/err"
+empty_out "the Claude hook under Codex says nothing"
+check "and joins nothing (no Claude-named agent in a Codex chat)" '[ ! -f "$T/fake/join_body" ]'
+check "and logs why" 'grep -q "claude-hooks-under-codex" "$SW/plugin.log"'
+printf '%s' "$(stop "$CX9" "$(transcript "$CX9")" "$P9")" | env HOME="$HOMEDIR" SNAPWORK_HOME="$SW" \
+  PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" PLUGIN_ROOT=/plugins/snapwork CLAUDE_PLUGIN_ROOT=/plugins/snapwork \
+  SNAPWORK_LISTEN_SECONDS=5 ${TEST_SH:-sh} "$PLUGIN" stop > "$T/out" 2> "$T/err"
+echo $? > "$T/rc"
+check "its Stop hook ends at once with 0 (it never holds the chat)" '[ "$(cat "$T/rc")" = 0 ]'
+# A PLUGIN_ROOT left in the environment (Claude Code started from a Codex shell) is not Codex.
+rm -f "$T/fake/join_body"
+TX9=$(transcript "$S12-x")
+printf '%s' "$(prompt "$CX9-x" "$TX9" "$P9" "${LINK}kfr-gggg-0001")" | env HOME="$HOMEDIR" SNAPWORK_HOME="$SW" \
+  PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" PLUGIN_ROOT=/elsewhere CLAUDE_PLUGIN_ROOT=/plugins/snapwork \
+  SNAPWORK_LISTEN_SECONDS=0 ${TEST_SH:-sh} "$PLUGIN" prompt > "$T/out" 2> "$T/err"
+check "Claude Code with a stray PLUGIN_ROOT still joins as Claude" 'grep -q "\"for\":\"claude-code\"" "$T/fake/join_body"'
+
 echo "== 20. send-to-space: a shortcut for \"send this to the space\""
 ROOM_X=14141414-0000-4000-8000-00000000000e
 echo "kfr-xxxx-0001|$ROOM_X|Send space X" >> "$T/fake/spaces"
