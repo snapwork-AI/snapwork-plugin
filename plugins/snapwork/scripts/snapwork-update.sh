@@ -19,8 +19,12 @@
 # as <file>.snapwork-bak (mode 600); the new text goes to a temp file in the same folder, is read
 # back and must equal the old content plus that one key, keeps the file's mode, then replaces it.
 #
-# $SNAPWORK_HOME/auto-update records that it was done (or left alone for a choice); after that
-# nothing is tried again, so a person who later turns it off is never overridden. Any other outcome
+# $SNAPWORK_HOME/auto-update records the outcome. "explicit" (the entry said "autoUpdate": false, or
+# anything but true) is the person's choice: nothing is tried again, so turning it off sticks. "on"
+# (we turned it on, or it already said true) is checked again at each start: Claude's own
+# `claude plugin marketplace add`, run again on a computer that has snapwork (the invite card's
+# install-or-update line, 7.8), rewrites the entry without "autoUpdate", which turns updates off
+# without anyone choosing it; then it is turned back on and the person is told. Any other outcome
 # (no entry, no tool, a refusal) changes nothing and is tried again next time.
 #
 # Uses from snapwork-plugin.sh: APP, STATE, SNAPWORK_HOME, NL, WORK, work_dir, plog, made_by_setup.
@@ -53,10 +57,12 @@ auto_update() {
   [ "$APP" = claude ] || return 0
   { [ -n "$STATE" ] && ! made_by_setup "$STATE"; } || return 0
   [ -d "$SNAPWORK_HOME" ] || return 0
-  if [ -e "$AUTO_MARK" ] || [ -L "$AUTO_MARK" ]; then
+  again=0
+  if [ -L "$AUTO_MARK" ] || { [ -e "$AUTO_MARK" ] && [ "$(head -c 3 "$AUTO_MARK" 2> /dev/null)" != "on " ]; }; then
     plog "auto-update-skip why=done-before"
     return 0
   fi
+  [ ! -e "$AUTO_MARK" ] || again=1
   # Claude's whole background update pass is off: turning it on here would change nothing.
   if [ -z "${FORCE_AUTOUPDATE_PLUGINS:-}" ] \
     && [ -n "${DISABLE_UPDATES:-}${DISABLE_AUTOUPDATER:-}${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-}" ]; then
@@ -94,11 +100,19 @@ auto_update() {
   case $res in
     'on settings' | 'on known')
       auto_mark "$res"
-      plog "auto-update-on file=${res#on } tool=$tool"
       if [ "$res" = 'on settings' ]; then where=$settings; else where=$known; fi
       case $where in "${HOME:-/nonexistent}"/*) where="~${where#"$HOME"}" ;; esac
       where=$(printf '%s' "$where" | tr -d '[:cntrl:]')
-      AUTO_NOTE="SnapWork also turned on automatic updates for the snapwork plugin in Claude (once), so new versions of snapwork arrive by themselves and load the next time Claude starts. To turn this off: /plugin, then Marketplaces, then snapwork in Claude Code, or set \"autoUpdate\": false on the snapwork entry in $where. Tell the person this too, in one more line." ;;
+      off="To turn this off: /plugin, then Marketplaces, then snapwork in Claude Code, or set \"autoUpdate\": false on the snapwork entry in $where."
+      if [ "$again" -eq 1 ]; then
+        plog "auto-update-again file=${res#on } tool=$tool"
+        AUTO_NOTE="SnapWork turned automatic updates for the snapwork plugin in Claude back on: adding the snapwork marketplace again had turned them off. $off Tell the person this too, in one more line."
+      else
+        plog "auto-update-on file=${res#on } tool=$tool"
+        AUTO_NOTE="SnapWork also turned on automatic updates for the snapwork plugin in Claude (once), so new versions of snapwork arrive by themselves and load the next time Claude starts. $off Tell the person this too, in one more line."
+      fi ;;
+    already-on)
+      [ "$again" -eq 1 ] || { auto_mark "on already"; plog "auto-update-skip why=already-on"; } ;;
     explicit)
       auto_mark explicit
       plog "auto-update-skip why=explicit" ;;
@@ -120,7 +134,8 @@ auto_mark() {
   ) 2> /dev/null || rm -f "$AUTO_MARK.$$"
 }
 
-# Prints one word line: "on settings", "on known", explicit, no-entry, symlink, bad-json, write-failed.
+# Prints one word line: "on settings", "on known", already-on, explicit, no-entry, symlink, bad-json,
+# write-failed.
 auto_update_py() {
   cat << 'PYEOF'
 import copy, json, os, stat, sys, tempfile
@@ -160,8 +175,9 @@ k = load(known_path)
 if s[0] == "bad" or k[0] == "bad":
     say("bad-json")
 se, ke = entry(s[1], "settings"), entry(k[1], "known")
-if (se is not None and "autoUpdate" in se) or (ke is not None and "autoUpdate" in ke):
-    say("explicit")
+chosen = [e["autoUpdate"] for e in (se, ke) if e is not None and "autoUpdate" in e]
+if chosen:
+    say("already-on" if all(v is True for v in chosen) else "explicit")
 if se is not None:
     where, path, (state, data, raw, mode, linked) = "settings", settings_path, s
 elif ke is not None:
@@ -175,13 +191,15 @@ expected = copy.deepcopy(data)
 entry(expected, where)["autoUpdate"] = True
 tmps = []
 try:
-    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".snapwork-bak.")
-    tmps.append(tmp)
-    with os.fdopen(fd, "wb") as f:
-        f.write(raw)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path + ".snapwork-bak")
-    tmps.remove(tmp)
+    # The first backup is the file as it was before SnapWork ever changed it: kept, never replaced.
+    if not os.path.lexists(path + ".snapwork-bak"):
+        fd, tmp = tempfile.mkstemp(dir=folder, prefix=".snapwork-bak.")
+        tmps.append(tmp)
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path + ".snapwork-bak")
+        tmps.remove(tmp)
     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".snapwork.")
     tmps.append(tmp)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -263,7 +281,8 @@ const k = load(knownPath);
 if (s.state === "bad" || k.state === "bad") say("bad-json");
 const se = entry(s.data, "settings");
 const ke = entry(k.data, "known");
-if ((se && "autoUpdate" in se) || (ke && "autoUpdate" in ke)) say("explicit");
+const chosen = [se, ke].filter((e) => e && "autoUpdate" in e).map((e) => e.autoUpdate);
+if (chosen.length > 0) say(chosen.every((v) => v === true) ? "already-on" : "explicit");
 let where;
 let file;
 let f;
@@ -277,12 +296,16 @@ entry(expected, where).autoUpdate = true;
 const tmps = [];
 const tmpName = (prefix) => path.join(folder, `${prefix}${crypto.randomBytes(8).toString("hex")}`);
 try {
-  let tmp = tmpName(".snapwork-bak.");
-  tmps.push(tmp);
-  fs.writeFileSync(tmp, f.raw, { mode: 0o600, flag: "wx" });
-  fs.chmodSync(tmp, 0o600);
-  fs.renameSync(tmp, `${file}.snapwork-bak`);
-  tmps.pop();
+  let tmp;
+  // The first backup is the file as it was before SnapWork ever changed it: kept, never replaced.
+  if (!isLink(`${file}.snapwork-bak`) && !fs.existsSync(`${file}.snapwork-bak`)) {
+    tmp = tmpName(".snapwork-bak.");
+    tmps.push(tmp);
+    fs.writeFileSync(tmp, f.raw, { mode: 0o600, flag: "wx" });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, `${file}.snapwork-bak`);
+    tmps.pop();
+  }
   tmp = tmpName(".snapwork.");
   tmps.push(tmp);
   fs.writeFileSync(tmp, `${JSON.stringify(expected, null, 2)}\n`, { mode: 0o600, flag: "wx" });

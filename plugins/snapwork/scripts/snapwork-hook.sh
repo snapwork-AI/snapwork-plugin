@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for SnapWork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 5
+# snapwork-hook-version: 6
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -12,6 +12,9 @@
 #   snapwork-hook.sh --fetch --room ID [--agent ID] <file id>    (save a shared file into snapwork-files/)
 #   snapwork-hook.sh --rename --room ID [--agent ID] -- <new name>  (change your name in the room;
 #                                                    prints "your name in this room is now <name>")
+#   snapwork-hook.sh --version                              (prints "snapwork-hook <version>")
+#
+# It keeps itself current (7.8): see "Updating itself" below.
 #
 # --file and --fetch are done by snapwork-files.sh next to this script (see its header): files
 # only from the project folder (the saved "project", else the current folder), never .env, .git,
@@ -91,6 +94,9 @@
 
 set -u
 
+# Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
+HOOK_VERSION=6
+
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
 EVENT=Stop
@@ -117,6 +123,7 @@ FILES_SCRIPT=$(dirname "$0")/snapwork-files.sh
 
 while [ $# -gt 0 ]; do
   case $1 in
+    --version) printf 'snapwork-hook %s\n' "$HOOK_VERSION"; exit 0 ;;
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
@@ -627,7 +634,7 @@ case $KEY in '' | *[!A-Za-z0-9._~+/=-]*) say_err "missing or odd agent key"; exi
 # Who polls (room_shows_old_plugins): this script's version, and the plugin's when the SnapWork
 # plugin runs it (SNAPWORK_PLUGIN_VERSION, digits and dots only), so the room can show who needs an
 # update. It goes in curl's config on stdin, like the key.
-USER_AGENT=snapwork-hook/5
+USER_AGENT=snapwork-hook/$HOOK_VERSION
 case ${SNAPWORK_PLUGIN_VERSION:-} in
   '' | *[!0-9.]*) ;;
   *.*.*) USER_AGENT="$USER_AGENT snapwork-plugin/$SNAPWORK_PLUGIN_VERSION" ;;
@@ -861,6 +868,82 @@ valid_200() {
   [ "$(head -c 1 "$WORK/body")" = "{" ]
 }
 
+# Updating itself (7.8, plugins_and_listeners_stay_current). Every poll reply to a listener no plugin
+# runs names the newest scripts the gateway serves: "x-snapwork-kit: hook=6:<sha256> files=5:<sha256>".
+# Once per listener, on a quiet poll of a Stop listener, a newer one is downloaded from the same
+# gateway next to the old one; it must have that SHA-256 and that version line, pass sh -n and (the
+# hook) answer --version, and then it replaces the old file in one rename, so a listener still running
+# the old file keeps reading it. Never when the SnapWork plugin runs this script (the plugin updates
+# itself), never a file reached through a symlink, never a files script that is not there yet; any
+# failure leaves the old file as it was, to be tried again by the next listener. A connection of the
+# one-line setup pins the scripts it checked ("hookSha", "filesSha"): after the swap every saved
+# connection that pinned the old file is pinned to the new one, else it would stay silent. The
+# SHA-256 comes from the same gateway as the file, like the setup's own pin: it catches a broken
+# download, not a hostile gateway. So only SnapWork's own gateway may update this shared file
+# (KIT_ORIGINS; SNAPWORK_KIT_ORIGIN adds one, for a self-hosted gateway or tests): a room on another
+# gateway, or a plain-http one on localhost, never replaces the listener every room uses.
+KIT_CHECKED=0
+KIT_ORIGINS="https://room.snapwork.ai https://space.snapwork.ai ${SNAPWORK_KIT_ORIGIN:-}"
+
+sha256_of() {
+  if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
+  elif command -v shasum > /dev/null 2>&1; then shasum -a 256 "$1" | cut -d ' ' -f 1
+  elif command -v openssl > /dev/null 2>&1; then openssl dgst -sha256 "$1" | sed 's/.*= *//'
+  fi
+}
+
+# The "<version> <sha256>" the last reply offers for hook or files, only when well formed.
+kit_offer() {
+  tr -d '\r' < "$WORK/headers" 2> /dev/null | sed -n 's/^[Xx]-[Ss]napwork-[Kk]it:[[:space:]]*//p' | tail -n 1 \
+    | tr ' ' '\n' | sed -n "s/^$1=\([0-9]\{1,4\}\):\([0-9a-f]\{64\}\)\$/\1 \2/p" | head -n 1
+}
+
+version_in() { sed -n "s/^# snapwork-$1-version: \([0-9]\{1,4\}\)\$/\1/p" "$2" 2> /dev/null | head -n 1; }
+
+# kit_repin hookSha|filesSha <old sha256> <new sha256>: saved connections that pinned the old file.
+kit_repin() {
+  for pinned in "$ROOMS_DIR"/*.json; do
+    [ -f "$pinned" ] && [ ! -L "$pinned" ] && [ "$(json_field "$1" "$pinned")" = "$2" ] || continue
+    (umask 077 && sed "s/^\([[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*\"\)$2\"/\1$3\"/" "$pinned" > "$pinned.$$") \
+      && [ "$(json_field "$1" "$pinned.$$")" = "$3" ] && chmod 600 "$pinned.$$" && mv -f "$pinned.$$" "$pinned" \
+      || rm -f "$pinned.$$"
+  done
+}
+
+# kit_take hook|files <installed version>: replace $HOME_DIR/snapwork-<name>.sh with the newer one offered.
+kit_take() {
+  offer=$(kit_offer "$1")
+  [ -n "$offer" ] || return 0
+  want=${offer%% *}
+  sum=${offer#* }
+  [ "$want" -gt "${2:-0}" ] 2> /dev/null || return 0
+  dest=$HOME_DIR/snapwork-$1.sh
+  [ ! -L "$dest" ] && [ ! -L "$HOME_DIR" ] || return 0
+  was=$(sha256_of "$dest")
+  new=$(umask 077 && mktemp "$dest.new.XXXXXX" 2> /dev/null) || return 0
+  if curl -q --proto =https,http --max-time 20 --max-filesize 1048576 -fsS -o "$new" "$GATEWAY/kit/snapwork-$1.sh" > /dev/null 2>&1 \
+    && [ "$(sha256_of "$new")" = "$sum" ] && [ "$(version_in "$1" "$new")" = "$want" ] \
+    && sh -n "$new" 2> /dev/null \
+    && { [ "$1" != hook ] || [ "$(sh "$new" --version 2> /dev/null < /dev/null)" = "snapwork-hook $want" ]; } \
+    && chmod 500 "$new" && mv -f "$new" "$dest"; then
+    [ -z "$was" ] || kit_repin "${1}Sha" "$was" "$sum"
+    return 0
+  fi
+  rm -f "$new"
+}
+
+kit_update() {
+  [ "$KIT_CHECKED" -eq 0 ] || return 0
+  KIT_CHECKED=1
+  [ -z "${SNAPWORK_PLUGIN_VERSION:-}" ] && [ "$EVENT" = Stop ] || return 0
+  [ -n "${SNAPWORK_HOME:-}${HOME:-}" ] || return 0
+  case " $KIT_ORIGINS " in *" $GATEWAY "*) ;; *) return 0 ;; esac
+  [ "$0" -ef "$HOME_DIR/snapwork-hook.sh" ] 2> /dev/null || return 0
+  kit_take hook "$HOOK_VERSION"
+  [ ! -f "$HOME_DIR/snapwork-files.sh" ] || kit_take files "$(version_in files "$HOME_DIR/snapwork-files.sh")"
+  return 0
+}
+
 if [ "$STATUS" -eq 1 ]; then
   # No cursor is sent or saved, so this never consumes a message.
   printf 'header = "Authorization: Bearer %s"\n' "$KEY" | curl -q -K - --proto =https,http --max-time 15 -fsS -G -o /dev/null \
@@ -943,6 +1026,7 @@ while :; do
       denied=0
       fresh=$(new_cursor)
       save_cursor "$fresh"
+      kit_update
       [ "$EVENT" = UserPromptSubmit ] && exit 0
       if [ "$WAIT" -eq 0 ] || [ -z "$fresh" ]; then sleep 1; fi
       ;;

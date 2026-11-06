@@ -212,7 +212,7 @@ echo "== 8. the listener follows the chat"
 reset_calls
 run stop "$(stop "$S1" "$TX1" "$P1")"
 called "original listens for A" "hook $ROOM_A"
-check "its poll names the hook and the plugin version (room_shows_old_plugins)" '[ "$(cat "$T/fake/ua_last")" = "snapwork-hook/5 snapwork-plugin/$(sed -n "s/^PLUGIN_VERSION=//p" "$PLUGIN")" ]'
+check "its poll names the hook and the plugin version (room_shows_old_plugins)" '[ "$(cat "$T/fake/ua_last")" = "snapwork-hook/$(sed -n "s/^HOOK_VERSION=//p" "$ROOT/plugins/snapwork/scripts/snapwork-hook.sh") snapwork-plugin/$(sed -n "s/^PLUGIN_VERSION=//p" "$PLUGIN")" ]'
 not_called "original does not listen for B" "hook $ROOM_B"
 reset_calls
 run stop "$(stop "$S2" "$TX2" "$P1")"
@@ -870,15 +870,39 @@ unix && check "marker written, mode 600" '[ "$(ls -l "$MARK" | cut -c 1-10)" = "
 check "log says it was turned on" 'grep -q "auto-update-on file=settings tool=python3" "$SW/plugin.log"'
 check "the log holds no path or file content" '! grep "auto-update" "$SW/plugin.log" | grep -q "/\|ECC\|opus"'
 
-# never twice: a person who later removes or turns it off is never overridden
+# still on at the next start: nothing changes and nothing is said
+cp "$CL/settings.json" "$T/settings.on"
+run start "$(start "$S31" "$(transcript "$S31")" "$P6" resume)"
+lacks "still on: nothing said" "automatic updates"
+check "still on: no edit" 'cmp -s "$CL/settings.json" "$T/settings.on"'
+
+# 7.8: `claude plugin marketplace add` run again drops the key (tested on Claude Code 2026-11-06):
+# it is put back at the next start, and the person is told why
 cp "$T/settings.orig" "$CL/settings.json"
 run prompt "$(prompt "$S31" "$(transcript "$S31")" "$P6" "${LINK}kfr-uuuu-0001")"
 has "another chat comes back to U" "is back in the room \"Update space U\""
-lacks "the come-back says nothing about updates" "automatic updates"
+has "the come-back says it is back on" "SnapWork turned automatic updates for the snapwork plugin in Claude back on: adding the snapwork marketplace again had turned them off."
+check "dropped key: put back, nothing else changed" 'turned_on "$CL/settings.json" "$T/settings.orig" settings'
+check "dropped key: the first backup is kept" 'cmp -s "$CL/settings.json.snapwork-bak" "$T/settings.orig"'
+check "log: again" 'grep -q "auto-update-again file=settings tool=python3" "$SW/plugin.log"'
+
+# a person who turns it off is never overridden: false is a choice, remembered for good
+python3 - "$CL/settings.json" << 'PYEOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p, encoding="utf-8"))
+d["extraKnownMarketplaces"]["snapwork"]["autoUpdate"] = False
+json.dump(d, open(p, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+PYEOF
+cp "$CL/settings.json" "$T/settings.off"
 run start "$(start "$S31" "$(transcript "$S31")" "$P6" resume)"
 has "a later start in a room" "You are a member of the SnapWork room"
-lacks "says nothing about updates" "automatic updates"
-check "no second edit" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
+lacks "turned off: nothing said" "automatic updates"
+check "turned off: no edit" 'cmp -s "$CL/settings.json" "$T/settings.off"'
+check "turned off: remembered" 'grep -q "^explicit " "$MARK"'
+cp "$T/settings.orig" "$CL/settings.json"
+run start "$(start "$S31" "$(transcript "$S31")" "$P6" resume)"
+check "after a choice, even a dropped key stays off" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
 check "log: done before" 'grep -q "auto-update-skip why=done-before" "$SW/plugin.log"'
 
 # a come-back turns it on too (first time on this computer)
@@ -896,15 +920,20 @@ run start "$(start "$S32" "$TX32" "$P6" resume)"
 has "start in a room says it" "SnapWork also turned on automatic updates"
 check "start: settings turned on" 'turned_on "$CL/settings.json" "$T/settings.orig" settings'
 
-# an explicit choice (false or true, in either file) is left alone, and remembered
+# a choice already made (false or true, in either file) is left alone, and remembered: false for
+# good, true as on (so a dropped key is put back later)
 for entry in "$SNAP_OFF" "$SNAP_ON"; do
   fresh_start
   settings_with "$entry"
   run start "$(start "$S32" "$TX32" "$P6" resume)"
-  lacks "an explicit choice: nothing said" "automatic updates"
-  check "an explicit choice: settings untouched" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
-  check "an explicit choice: no backup" '[ ! -e "$CL/settings.json.snapwork-bak" ]'
-  check "an explicit choice is remembered" 'grep -q "^explicit " "$MARK"'
+  lacks "a choice made: nothing said" "automatic updates"
+  check "a choice made: settings untouched" 'cmp -s "$CL/settings.json" "$T/settings.orig"'
+  check "a choice made: no backup" '[ ! -e "$CL/settings.json.snapwork-bak" ]'
+  if [ "$entry" = "$SNAP_OFF" ]; then
+    check "off is remembered for good" 'grep -q "^explicit " "$MARK"'
+  else
+    check "on is remembered as on" 'grep -q "^on already " "$MARK"'
+  fi
 done
 check "log: explicit" 'grep -q "auto-update-skip why=explicit" "$SW/plugin.log"'
 fresh_start

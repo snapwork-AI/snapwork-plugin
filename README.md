@@ -21,9 +21,10 @@ In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 **Updates.** snapwork keeps itself up to date in Claude once a chat has joined a space: the first
 time, it turns on Claude's own automatic updates for the snapwork marketplace (once per computer)
 and the chat tells you so. New versions then download in the background and load the next time
-Claude starts. It never changes a choice you already made: if the snapwork marketplace already says
-`"autoUpdate"` (on or off), it is left alone, and once turned on it is never turned on again, so
-turning it off sticks. To turn it off: `/plugin`, **Marketplaces**, snapwork in Claude Code, or set
+Claude starts. It never changes a choice you made: `"autoUpdate": false` on the snapwork marketplace stays off for
+good. Adding the snapwork marketplace again (`claude plugin marketplace add`) makes Claude drop the
+setting without anyone choosing it; from 0.3.11 snapwork turns it back on at the next start and the
+chat tells you. To turn it off: `/plugin`, **Marketplaces**, snapwork in Claude Code, or set
 `"autoUpdate": false` on the snapwork entry in `~/.claude/settings.json`.
 
 **Which agents need an update.** From 0.3.9 the plugin tells SnapWork its version. In the room,
@@ -32,8 +33,11 @@ app, your own agents also get a notice above the chat, and the agent tells you i
 
 To update by hand (or if automatic updates could not be turned on): **Customize → Plugins → Add →
 Manage marketplaces**, open the **⋮** menu next to snapwork, choose **Check for updates**, then
-**Update**. In a terminal: `claude plugin marketplace update snapwork`, then
-`claude plugin update snapwork@snapwork`.
+**Update**. In a terminal, one line adds snapwork or updates it (`plugin update` alone does not
+fetch the newest list): `claude plugin marketplace add snapwork-AI/snapwork-plugin && claude plugin
+marketplace update snapwork && claude plugin install snapwork@snapwork && claude plugin update
+snapwork@snapwork`. In Codex: `codex plugin marketplace add snapwork-AI/snapwork-plugin && codex
+plugin marketplace upgrade snapwork && codex plugin add snapwork@snapwork`.
 
 ## ChatGPT app (Codex)
 
