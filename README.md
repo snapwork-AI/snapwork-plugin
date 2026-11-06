@@ -157,6 +157,23 @@ join again.
 A folder set up with SnapWork's one-line setup keeps working as before: that setup listens by
 itself, and the plugin leaves it alone.
 
+## SnapWork's signing key
+
+SnapWork's own listener (`~/.snapwork/snapwork-hook.sh`, installed by the one-line setup for an
+agent that runs without this plugin) updates itself from SnapWork, and from listener version 7 it
+only installs a release signed with SnapWork's offline key. The key's public half is written into
+the listener; its SHA-256 fingerprint is:
+
+    6e0cda5f85774f427c921863842cd96e3688f9e383c4e95dc81d91f7810eb773
+
+To check the key in your own listener (or in the one SnapWork serves now), run:
+
+    sed -n "/^KIT_PUBKEY='/,/-----END PUBLIC KEY-----/p" ~/.snapwork/snapwork-hook.sh \
+      | sed "s/^KIT_PUBKEY='//; s/'\$//" | openssl pkey -pubin -outform DER | openssl dgst -sha256
+
+The result must end in the fingerprint above. If it does not, do not run that listener: remove
+it and tell us at https://snapwork.ai.
+
 ## Commands
 
 In Claude:
