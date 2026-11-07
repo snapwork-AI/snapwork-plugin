@@ -67,7 +67,7 @@ HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
 # names it to SnapWork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.12
+PLUGIN_VERSION=0.3.13
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}

@@ -30,6 +30,11 @@ if [ "${1:-}" = agents ]; then
   exit 0
 fi
 { printf 'cwd=%s path=%s' "$(pwd -P)" "$PATH"; for a in "$@"; do printf ' |%s' "$a"; done; printf '\n'; } >> "$FAKE_DIR/claude_calls"
+if [ "${1:-}" = plugin ]; then
+  [ ! -e "$FAKE_DIR/claude_slow" ] || sleep 6
+  [ ! -e "$FAKE_DIR/claude_nobg" ] || exit 1
+  exit 0
+fi
 if [ -e "$FAKE_DIR/claude_untrusted" ]; then
   echo "Workspace not trusted. Run \`claude\` in $(pwd) once and accept the trust prompt, then retry." >&2
   exit 1
@@ -50,6 +55,10 @@ EOF
 cat > "$T/bin/codex.fake" << 'EOF2'
 #!/bin/sh
 { printf 'cwd=%s path=%s' "$(pwd -P)" "$PATH"; for a in "$@"; do printf ' |%s' "$a"; done; printf '\n'; } >> "$FAKE_DIR/codex_calls"
+if [ "${1:-}" = plugin ]; then
+  [ ! -e "$FAKE_DIR/codex_fail" ] || exit 1
+  exit 0
+fi
 if [ -e "$FAKE_DIR/codex_gone" ]; then
   echo "Error: thread/resume: thread/resume failed: no rollout found for thread id $4 (code -32600)" >&2
   exit 1
@@ -315,7 +324,7 @@ rm -f "$SW/watch.starting"
 SA2=a2a2a2a2-aaaa-4000-8000-0000000000a2
 printf 'kfr-aaaa-00a2|aaaaaaaa-0000-4000-8000-0000000000a2|Space A2\n' >> "$T/fake/spaces"
 run prompt "$(prompt "$SA2" "$(transcript "$SA2")" "$P2" "${INVITE}kfr-aaaa-00a2")"
-check "the watcher copy is the plugin's again" 'grep -q "^VERSION=0.3.10$" "$SW/snapwork-watch.sh"'
+check "the watcher copy is the plugin's again" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
 unix && check "and stays owner only" '[ "$(ls -l "$SW/snapwork-watch.sh" | cut -c 1-10)" = "-rwx------" ]'
 
 echo "== 10b. another chat in the same folder: the same home id"
@@ -455,7 +464,7 @@ printf '{\n  "kind": "folder",\n  "home": "%s",\n  "project": "%s/gone"\n}\n' "$
 watch
 called "a missing folder is refused" "report $ADD1 {\"state\":\"failed\",\"failure\":\"home_gone\"}"
 check "nothing started for them" '[ ! -f "$T/fake/claude_calls" ]'
-check "the watcher says it is 0.3.10" 'grep -q "^VERSION=0.3.10$" "$SW/snapwork-watch.sh"'
+check "the watcher says it is 0.3.13" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
 check "the connect script and the watcher name the same version" '[ "$(sed -n "s/^WATCH_VERSION=//p" "$SCRIPTS/snapwork-connect.sh")" = "$(sed -n "s/^VERSION=//p" "$SCRIPTS/snapwork-watch.sh")" ]'
 
 echo "== 11. the watcher brings a chat in a room back (7.5)"
@@ -490,7 +499,7 @@ check "the resume command, exactly: the saved chat, the label, the fixed prompt"
 check "no id from SnapWork reaches the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" "$T/fake/claude_calls"'
 called "reported started with the chat's id" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
 not_called "not reported as an add" "report $RV"
-check "the poll says the watcher knows Codex revivals too (v=0.3.10)" 'grep -q "[?&]v=0.3.10$" "$T/fake/work_url"'
+check "the poll says the watcher knows Codex revivals too (v=0.3.13)" 'grep -q "[?&]v=0.3.13$" "$T/fake/work_url"'
 check "logged with short ids only" 'grep -q "revive id=e7e7e7e7 session=abcdef01$" "$SW/watch.log" && grep -q "started revive=e7e7e7e7 session=abcdef01" "$SW/watch.log"'
 check "the room's name is not logged" '! grep -q "Room R" "$SW/watch.log"'
 check "the watcher marked that it was starting a chat, owner only" '[ -f "$SW/watch.starting" ] && { [ "$WINDOWS" -eq 1 ] || [ "$(ls -l "$SW/watch.starting" | cut -c 1-10)" = "-rw-------" ]; }'
@@ -728,7 +737,7 @@ reset
 touch "$T/fake/claude_nobg"
 watch
 revival "no id printed" start_failed
-check "the watcher says it knows revivals on its poll" 'grep -q "^VERSION=0.3.10$" "$SW/snapwork-watch.sh"'
+check "the watcher says it knows revivals on its poll" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
 
 echo "== 11i. a Codex chat comes back through Codex's own daemon (codex_comes_back_through_its_daemon)"
 codex_args() { sed -n "${1:-1}p" "$T/fake/codex_calls" | sed 's/^cwd=[^ ]* path=[^ ]*//'; }
@@ -811,8 +820,8 @@ check "not while the watcher is starting a chat (or just did)" 'grep -q "^VERSIO
 check "and that is not counted for the hourly limit" '[ ! -f "$SW/watch-refresh.stamp" ]'
 age "$SW/watch.starting" 600
 start_chat "$S12" "$(transcript "$S12")"
-check "the watcher copy is this plugin's again" 'grep -q "^VERSION=0.3.10$" "$SW/snapwork-watch.sh"'
-check "logged" 'grep -q "watcher-refreshed to=0.3.10" "$SW/plugin.log"'
+check "the watcher copy is this plugin's again" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
+check "logged" 'grep -q "watcher-refreshed to=0.3.13" "$SW/plugin.log"'
 check "the chat is told nothing about it" '! grep -q -i "watcher" "$T/out"'
 unix && check "the hourly stamp is owner only" '[ "$(ls -l "$SW/watch-refresh.stamp" | cut -c 1-10)" = "-rw-------" ]'
 : > "$SW/plugin.log"
@@ -828,17 +837,62 @@ printf '{"type":"user","sessionId":"%s","forkedFrom":{"sessionId":"%s"}}\n' "$S1
 start_chat "$S13" "$TXC" resume
 check "never from a copy (/fork, or a chat the watcher started)" 'grep -q "^VERSION=0.3.2$" "$SW/snapwork-watch.sh"'
 start_chat "$S12" "$(transcript "$S12")" startup
-check "after an hour, again" 'grep -q "^VERSION=0.3.10$" "$SW/snapwork-watch.sh"'
+check "after an hour, again" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
 rm -f "$SW/watch-refresh.stamp"
-set_watch_version 0.3.11
+set_watch_version 0.3.99
 : > "$SW/plugin.log"
 start_chat "$S12" "$(transcript "$S12")"
-check "a newer copy (the other app's plugin) is never taken back" 'grep -q "^VERSION=0.3.11$" "$SW/snapwork-watch.sh" && ! grep -q "watcher-refreshed" "$SW/plugin.log"'
+check "a newer copy (the other app's plugin) is never taken back" 'grep -q "^VERSION=0.3.99$" "$SW/snapwork-watch.sh" && ! grep -q "watcher-refreshed" "$SW/plugin.log"'
 reset
 connect "$S9" "$(transcript "$S9")" "$HOMEDIR/proj9" kfr-cccc-0092
 has "connected" "connected."
-check "nor by a connect" 'grep -q "^VERSION=0.3.11$" "$SW/snapwork-watch.sh" && grep -q "watcher-kept version=0.3.11" "$SW/plugin.log"'
-set_watch_version 0.3.10
+check "nor by a connect" 'grep -q "^VERSION=0.3.99$" "$SW/snapwork-watch.sh" && grep -q "watcher-kept version=0.3.99" "$SW/plugin.log"'
+set_watch_version 0.3.13
+
+echo "== 11j. the watcher updates the SnapWork plugin (7.9, plugins_update_from_the_watcher)"
+UP=f1f1f1f1-0000-4000-8000-000000000001
+update_line() { printf 'update\t%s\t%s\t%s\n' "$1" "$2" "$3" > "$T/fake/work_lines"; }
+reset
+update_line "$UP" claude-code 0.3.13
+watch
+check "claude refreshes the snapwork marketplace, then updates the plugin" '[ "$(claude_args 1)" = " |plugin |marketplace |update |snapwork" ] && [ "$(claude_args 2)" = " |plugin |update |snapwork@snapwork" ]'
+check "never marketplace add (it drops the auto-update setting)" '! grep -q " |marketplace |add" "$T/fake/claude_calls"'
+check "from ~/.snapwork, with the PATH a home recorded" 'grep -q "^cwd=$SW " "$T/fake/claude_calls" && grep -q " path=$T/bin:" "$T/fake/claude_calls"'
+called "reported done" "update $UP {\"state\":\"done\"}"
+check "logged with short ids" 'grep -q "update id=f1f1f1f1 app=claude to=0.3.13" "$SW/watch.log" && grep -q "updated id=f1f1f1f1 app=claude" "$SW/watch.log"'
+reset
+touch "$T/fake/claude_nobg"
+update_line "$UP" claude-code 0.3.13
+watch
+called "a failing update says so" "update $UP {\"state\":\"failed\",\"failure\":\"update_failed\"}"
+reset
+touch "$T/fake/claude_slow"
+update_line "$UP" claude-code 0.3.13
+SNAPWORK_UPDATE_MAX_S=1 watch
+rm -f "$T/fake/claude_slow"
+called "an update that hangs is stopped and said failed" "update $UP {\"state\":\"failed\",\"failure\":\"update_failed\"}"
+check "logged as a timeout" 'grep -q "update-timeout id=f1f1f1f1 after=1s" "$SW/watch.log"'
+reset
+cp "$T/bin/codex.fake" "$T/bin/codex"
+update_line "$UP" codex 0.3.13
+watch
+check "codex upgrades the marketplace, then adds the plugin again" '[ "$(codex_args 1)" = " |plugin |marketplace |upgrade |snapwork" ] && [ "$(codex_args 2)" = " |plugin |add |snapwork@snapwork" ]'
+called "codex: reported done" "update $UP {\"state\":\"done\"}"
+rm -f "$T/bin/codex"
+reset
+update_line "$UP" 'rm -rf' 0.3.13
+watch
+called "an app it does not know: no_runtime, nothing run" "update $UP {\"state\":\"failed\",\"failure\":\"no_runtime\"}"
+check "nothing ran for it" '[ ! -f "$T/fake/claude_calls" ] && [ ! -f "$T/fake/codex_calls" ]'
+reset
+update_line "$UP" claude-code '0.3;touch pwned'
+watch
+check "a version that is not digits and dots runs nothing" '[ ! -f "$T/fake/claude_calls" ] && [ ! -e "$SW/pwned" ]'
+not_called "and reports nothing" "update $UP"
+reset
+update_line "not-a-uuid" claude-code 0.3.13
+watch
+check "a bad update id runs nothing" '[ ! -f "$T/fake/claude_calls" ]'
 
 echo "== 9. logs keep no keys, codes or invitations"
 unix && check "watch log mode 600" '[ "$(ls -l "$SW/watch.log" | cut -c 1-10)" = "-rw-------" ]'

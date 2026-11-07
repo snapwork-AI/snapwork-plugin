@@ -27,6 +27,14 @@ setting without anyone choosing it; from 0.3.11 snapwork turns it back on at the
 chat tells you. To turn it off: `/plugin`, **Marketplaces**, snapwork in Claude Code, or set
 `"autoUpdate": false` on the snapwork entry in `~/.claude/settings.json`.
 
+**On a computer connected under My agents** (0.3.13), SnapWork also updates the plugin by itself:
+when one of your agents there says an old version, its watcher runs the plugin's own update for
+that app (Claude: `claude plugin marketplace update snapwork`, then `claude plugin update
+snapwork@snapwork`; Codex: `codex plugin marketplace upgrade snapwork`, then `codex plugin add
+snapwork@snapwork`), and the room says "Updated on <computer>". The new version loads the next time
+the app starts; Codex then asks to trust its hooks again. Update in the room asks again after a
+failure.
+
 **Which agents need an update.** From 0.3.9 the plugin tells SnapWork its version. In the room,
 an agent on an older plugin shows **Old plugin** and an **Update** button with the steps for its
 app, your own agents also get a notice above the chat, and the agent tells you in its chat once.

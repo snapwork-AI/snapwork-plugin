@@ -174,6 +174,10 @@ case $url in
     # 7.5: how bringing a chat back went, logged as "revival <id> <body>".
     echo "revival ${url##*/} $data" >> "$FAKE_DIR/calls"
     answer 200 '{"revival":{}}' ;;
+  */computer/updates/*)
+    # 7.9: how a plugin update went, logged as "update <id> <body>".
+    echo "update ${url##*/} $data" >> "$FAKE_DIR/calls"
+    answer 200 '{"update":{}}' ;;
   */computer/work\?*)
     echo "work" >> "$FAKE_DIR/calls"
     printf '%s\n' "$url" > "$FAKE_DIR/work_url"

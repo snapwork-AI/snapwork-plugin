@@ -39,7 +39,7 @@ CONNECT_URL=$GATEWAY/c/
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
 WATCH_SCRIPT=$SNAPWORK_HOME/snapwork-watch.sh
-WATCH_VERSION=0.3.10
+WATCH_VERSION=0.3.13
 WATCH_LABEL=ai.snapwork.watch
 WATCH_NOTE=
 # The watcher touches this while it starts a chat (and just after): no restart then.

@@ -23,7 +23,14 @@
 # each chat a folder that is no git repository), in the background: it answers, then its listener
 # waits for the room. The app's own codex is used when there is no terminal one.
 #
-# What it never does: run anything but the one fork (or fresh-chat, or resume) command (and
+# Updating the plugin (7.9, plugins_update_from_the_watcher): an "update" line names an app
+# (claude-code or codex) whose SnapWork plugin on this computer is behind. The watcher runs that
+# app's own plugin update, fixed here: Claude refreshes the snapwork marketplace, then updates the
+# plugin (never `marketplace add`, which would drop the marketplace's auto-update setting); Codex
+# upgrades the marketplace, then adds the plugin again. It tells SnapWork done, or why not in a fixed
+# word (no_runtime, update_failed). The new version loads the next time the app starts.
+#
+# What it never does: run anything but the one fork (or fresh-chat, or resume, or plugin update) command (and
 # `claude stop` on a copy a resume made by mistake), from a home this computer
 # registered (homes/<id>.json, written by the plugin when the person connected the chat), in that
 # chat's own folder as recorded here (never a folder the gateway names), with the invitation as
@@ -44,7 +51,7 @@ set -u
 GATEWAY=https://space.snapwork.ai
 # The same gateway's new main address: its invitations are accepted too (room_word_and_address).
 ALT_GATEWAY=https://room.snapwork.ai
-VERSION=0.3.10
+VERSION=0.3.13
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
 COMPUTER_FILE=$SNAPWORK_HOME/computer.json
 HOMES=$SNAPWORK_HOME/homes
@@ -57,6 +64,9 @@ LOG_MAX_BYTES=65536
 LOG_KEEP_LINES=200
 BACKOFF_MAX_S=300
 TAB=$(printf '\t')
+# How long a plugin update may take before it counts as failed (7.9).
+UPDATE_MAX_S=${SNAPWORK_UPDATE_MAX_S:-300}
+UPDATE_PIDS=
 # The only prompt a chat brought back gets. Never text from SnapWork.
 REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
 # A chat whose transcript changed this recently may still be running: it is not started again.
@@ -133,6 +143,10 @@ failed() { report "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed
 # revived <revive id> <json body>: tells SnapWork how bringing a chat back went (logged).
 revived() { send "revivals/$1" "$2"; wlog "report revive=$(short "$1") status=$status"; }
 not_revived() { revived "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed revive=$(short "$1") why=$2"; }
+
+# updated <update id> <json body>: tells SnapWork how a plugin update went (logged, 7.9).
+updated() { send "updates/$1" "$2"; wlog "report update=$(short "$1") status=$status"; }
+not_updated() { updated "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed update=$(short "$1") why=$2"; }
 
 # A room's name as SnapWork sent it, safe as one argument: anything a shell or a flag would read
 # makes it "SnapWork".
@@ -409,6 +423,71 @@ revive_codex() {
   fi
 }
 
+# any_home <app>: a home this computer registered for that app (its command and PATH), else none.
+any_home() {
+  HOME_FILE=
+  for f in "$HOMES"/*.json; do
+    { [ -f "$f" ] && [ ! -L "$f" ]; } || continue
+    saved=$(field app "$f")
+    [ "${saved:-claude}" = "$1" ] || continue
+    HOME_FILE=$f
+    return 0
+  done
+  return 1
+}
+
+# update_one <update> <runtime> <version>: one "update" line (7.9). SnapWork names the app; the
+# commands are this watcher's own, run from ~/.snapwork (never a project folder), with no input.
+update_one() {
+  valid_uuid "$1" || { wlog "bad-item"; return 0; }
+  case $2 in
+    claude-code) app=claude ;;
+    codex) app=codex ;;
+    *) not_updated "$1" no_runtime; return 0 ;;
+  esac
+  case $3 in '' | *[!0-9.]*) wlog "bad-item update=$(short "$1")"; return 0 ;; esac
+  any_home "$app" || HOME_FILE=
+  runner_of "$app"
+  [ -n "$runner" ] || { not_updated "$1" no_runtime; return 0; }
+  wlog "update id=$(short "$1") app=$app to=$3"
+  if [ "$app" = codex ]; then
+    set -- "$1" "plugin marketplace upgrade snapwork" "plugin add snapwork@snapwork"
+  else
+    set -- "$1" "plugin marketplace update snapwork" "plugin update snapwork@snapwork"
+  fi
+  run_update "$@"
+}
+
+# run_update <update> <first words> <second words>: in the background, so starts and comebacks go
+# on meanwhile; reported when it ends, or as update_failed after UPDATE_MAX_S (then stopped). The
+# watcher's own traps are reset: this copy must not remove its work folder or lock when it ends.
+run_update() {
+  (
+    trap - EXIT TERM INT HUP
+    # $2 and $3 are the fixed words from update_one, split on purpose.
+    # shellcheck disable=SC2086
+    (cd "$SNAPWORK_HOME" && PATH=${chat_path:-$PATH} "$runner" $2 && PATH=${chat_path:-$PATH} "$runner" $3) \
+      > /dev/null 2>&1 < /dev/null &
+    job=$!
+    waited=0
+    while kill -0 "$job" 2> /dev/null && [ "$waited" -lt "$UPDATE_MAX_S" ]; do
+      sleep 1
+      waited=$((waited + 1))
+    done
+    if kill -0 "$job" 2> /dev/null; then
+      kill "$job" 2> /dev/null
+      wlog "update-timeout id=$(short "$1") after=${UPDATE_MAX_S}s"
+      not_updated "$1" update_failed
+    elif wait "$job"; then
+      updated "$1" '{"state":"done"}'
+      wlog "updated id=$(short "$1") app=$app"
+    else
+      not_updated "$1" update_failed
+    fi
+  ) &
+  UPDATE_PIDS="$UPDATE_PIDS $!"
+}
+
 poll() {
   key=$(field key "$COMPUTER_FILE")
   [ -n "$key" ] || { wlog "no-key"; exit 0; }
@@ -425,6 +504,7 @@ poll() {
   esac
   # start <add> <runtime> <home> <invitation> <name> [<kind>]
   # revive <revive> <runtime> <space> <agent> <label>     (7.5; only to a watcher at 0.3.7 or later)
+  # update <update> <runtime> <version>                   (7.9; only to a watcher at 0.3.13 or later)
   # Any other first word is skipped. `|| [ -n "$what" ]`: a last line without its line break counts.
   while IFS=$TAB read -r what id runtime f3 f4 f5 f6 || [ -n "${what:-}" ]; do
     # A tab left in the last field (a line with more fields than this watcher knows) is dropped.
@@ -432,6 +512,7 @@ poll() {
     case $what in
       start) start_one "$id" "$runtime" "$f3" "$f4" "$f5" "$f6" ;;
       revive) revive_one "$id" "$runtime" "$f3" "$f4" "$f5" ;;
+      update) update_one "$id" "$runtime" "$f3" ;;
     esac
   done < "$WORK/work"
   return 0
@@ -449,5 +530,10 @@ while :; do
     backoff=$((backoff * 2))
     [ "$backoff" -le "$BACKOFF_MAX_S" ] || backoff=$BACKOFF_MAX_S
   fi
-  [ -z "$ONCE" ] || exit 0
+  # One poll only (tests): wait for a plugin update still running, so it is reported (never for a
+  # chat it started: that keeps running).
+  if [ -n "$ONCE" ]; then
+    for pid in $UPDATE_PIDS; do wait "$pid"; done
+    exit 0
+  fi
 done
