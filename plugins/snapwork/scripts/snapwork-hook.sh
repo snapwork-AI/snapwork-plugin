@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for SnapWork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 6
+# snapwork-hook-version: 7
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -95,7 +95,7 @@
 set -u
 
 # Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
-HOOK_VERSION=6
+HOOK_VERSION=7
 
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
@@ -869,21 +869,36 @@ valid_200() {
 }
 
 # Updating itself (7.8, plugins_and_listeners_stay_current). Every poll reply to a listener no plugin
-# runs names the newest scripts the gateway serves: "x-snapwork-kit: hook=6:<sha256> files=5:<sha256>".
-# Once per listener, on a quiet poll of a Stop listener, a newer one is downloaded from the same
-# gateway next to the old one; it must have that SHA-256 and that version line, pass sh -n and (the
-# hook) answer --version, and then it replaces the old file in one rename, so a listener still running
-# the old file keeps reading it. Never when the SnapWork plugin runs this script (the plugin updates
-# itself), never a file reached through a symlink, never a files script that is not there yet; any
+# runs says which scripts the gateway serves ("x-snapwork-kit: hook=7:<sha256> files=5:<sha256>").
+# When one is newer than what is installed, and only then, the listener fetches the kit manifest
+# (kit-manifest.txt: "snapwork-hook.sh 7 <sha256>" per script) and its signature, and checks the
+# signature with the public key below (RSA, SHA-256, `openssl dgst -verify`). The private key never
+# touches the gateway: it is kept offline and a person signs each release (scripts/sign-kit.sh), so
+# a gateway that was broken into cannot push code to listeners. A script from the signed manifest
+# must have its SHA-256 and version line, pass sh -n and (the hook) answer --version; then it
+# replaces the old file in one rename, so a listener still running the old file keeps reading it.
+# Once per listener, on a quiet poll of a Stop listener. Never when the SnapWork plugin runs this
+# script (the plugin updates itself), never without openssl or the key, never from a gateway other
+# than SnapWork's own (KIT_ORIGINS; SNAPWORK_KIT_ORIGIN adds one, for a self-hosted gateway or
+# tests), never a file reached through a symlink, never a files script that is not there yet; any
 # failure leaves the old file as it was, to be tried again by the next listener. A connection of the
 # one-line setup pins the scripts it checked ("hookSha", "filesSha"): after the swap every saved
-# connection that pinned the old file is pinned to the new one, else it would stay silent. The
-# SHA-256 comes from the same gateway as the file, like the setup's own pin: it catches a broken
-# download, not a hostile gateway. So only SnapWork's own gateway may update this shared file
-# (KIT_ORIGINS; SNAPWORK_KIT_ORIGIN adds one, for a self-hosted gateway or tests): a room on another
-# gateway, or a plain-http one on localhost, never replaces the listener every room uses.
+# connection that pinned the old file is pinned to the new one, else it would stay silent.
 KIT_CHECKED=0
 KIT_ORIGINS="https://room.snapwork.ai https://space.snapwork.ai ${SNAPWORK_KIT_ORIGIN:-}"
+# kit-signing-key-start (scripts/sign-kit.sh init writes it; empty: never updates itself)
+KIT_PUBKEY='-----BEGIN PUBLIC KEY-----
+MIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEAl6UZDwOYG1PQOvHphgM6
+uP2PHTp/t1v0SvUXgt2G5nehLFPscu6rhFXBYLkqFxhmvbGouWxqae4vAibidqIq
+IQXVBWqGm2KcT7IFvmEf2E/9blAg0QIMnnT41hzZTXA9b4a9YKVzya2A45J/ptx5
+EVyzsgpW2xqqTywPiiPk41SlqIJpgp69AYxsXgOwKQAU0siWUd+YBBTkVPfvgBFB
+LZnLHPQCdh+TRsve5nFk3cW7VE0YVXjIrDrmuUem+E9Dic39jD+oFHTXl12fMZPr
+bf/BgP/5/D+kn7TeuMdQKAKWCcOkE5K1HVnaLYD7yjs2T4a6y0tydbfjbtuuyzvy
+gdEhs9RM0MmubueGES2RafI6pk+4hFqBYWPhCbhhOgS0DWfg753EH6r4CC1KMeqQ
+VQGnfmVp+68FzQXnGZQDcWVThJKnpNPs4/KtBR2zcnBJ//9SppZf+k19M3/EVqWG
+A37yF3N72L6YWkNiA8FF9e6mQ1M0hw9us4+3BiezKibpAgMBAAE=
+-----END PUBLIC KEY-----'
+# kit-signing-key-end
 
 sha256_of() {
   if command -v sha256sum > /dev/null 2>&1; then sha256sum "$1" | cut -d ' ' -f 1
@@ -892,13 +907,31 @@ sha256_of() {
   fi
 }
 
-# The "<version> <sha256>" the last reply offers for hook or files, only when well formed.
-kit_offer() {
+# The version the last reply offers for hook or files, only when well formed.
+kit_offered() {
   tr -d '\r' < "$WORK/headers" 2> /dev/null | sed -n 's/^[Xx]-[Ss]napwork-[Kk]it:[[:space:]]*//p' | tail -n 1 \
-    | tr ' ' '\n' | sed -n "s/^$1=\([0-9]\{1,4\}\):\([0-9a-f]\{64\}\)\$/\1 \2/p" | head -n 1
+    | tr ' ' '\n' | sed -n "s/^$1=\([0-9]\{1,4\}\):[0-9a-f]\{64\}\$/\1/p" | head -n 1
 }
 
 version_in() { sed -n "s/^# snapwork-$1-version: \([0-9]\{1,4\}\)\$/\1/p" "$2" 2> /dev/null | head -n 1; }
+
+# kit_fetch <path> <file>: one small download from the gateway.
+kit_fetch() {
+  curl -q --proto =https,http --max-time 20 --max-filesize "$3" -fsS -o "$2" "$GATEWAY/kit/$1" > /dev/null 2>&1
+}
+
+# The signed manifest in $WORK/kit-manifest.txt; fails unless the signature checks out.
+kit_manifest() {
+  [ -n "$KIT_PUBKEY" ] && command -v openssl > /dev/null 2>&1 || return 1
+  (umask 077 && printf '%s\n' "$KIT_PUBKEY" > "$WORK/kit-key.pem") || return 1
+  kit_fetch kit-manifest.txt "$WORK/kit-manifest.txt" 4096 && kit_fetch kit-manifest.sig "$WORK/kit-manifest.sig" 4096 \
+    && openssl dgst -sha256 -verify "$WORK/kit-key.pem" -signature "$WORK/kit-manifest.sig" "$WORK/kit-manifest.txt" > /dev/null 2>&1
+}
+
+# "<version> <sha256>" the signed manifest gives for hook or files, only when well formed.
+kit_signed() {
+  sed -n "s/^snapwork-$1\.sh \([0-9]\{1,4\}\) \([0-9a-f]\{64\}\)\$/\1 \2/p" "$WORK/kit-manifest.txt" 2> /dev/null | head -n 1
+}
 
 # kit_repin hookSha|filesSha <old sha256> <new sha256>: saved connections that pinned the old file.
 kit_repin() {
@@ -910,18 +943,18 @@ kit_repin() {
   done
 }
 
-# kit_take hook|files <installed version>: replace $HOME_DIR/snapwork-<name>.sh with the newer one offered.
+# kit_take hook|files <installed version>: replace $HOME_DIR/snapwork-<name>.sh with the newer signed one.
 kit_take() {
-  offer=$(kit_offer "$1")
-  [ -n "$offer" ] || return 0
-  want=${offer%% *}
-  sum=${offer#* }
+  signed=$(kit_signed "$1")
+  [ -n "$signed" ] || return 0
+  want=${signed%% *}
+  sum=${signed#* }
   [ "$want" -gt "${2:-0}" ] 2> /dev/null || return 0
   dest=$HOME_DIR/snapwork-$1.sh
   [ ! -L "$dest" ] && [ ! -L "$HOME_DIR" ] || return 0
   was=$(sha256_of "$dest")
   new=$(umask 077 && mktemp "$dest.new.XXXXXX" 2> /dev/null) || return 0
-  if curl -q --proto =https,http --max-time 20 --max-filesize 1048576 -fsS -o "$new" "$GATEWAY/kit/snapwork-$1.sh" > /dev/null 2>&1 \
+  if kit_fetch "snapwork-$1.sh" "$new" 1048576 \
     && [ "$(sha256_of "$new")" = "$sum" ] && [ "$(version_in "$1" "$new")" = "$want" ] \
     && sh -n "$new" 2> /dev/null \
     && { [ "$1" != hook ] || [ "$(sh "$new" --version 2> /dev/null < /dev/null)" = "snapwork-hook $want" ]; } \
@@ -937,10 +970,18 @@ kit_update() {
   KIT_CHECKED=1
   [ -z "${SNAPWORK_PLUGIN_VERSION:-}" ] && [ "$EVENT" = Stop ] || return 0
   [ -n "${SNAPWORK_HOME:-}${HOME:-}" ] || return 0
-  case " $KIT_ORIGINS " in *" $GATEWAY "*) ;; *) return 0 ;; esac
+  ours=0
+  for origin in $KIT_ORIGINS; do [ "$origin" != "$GATEWAY" ] || ours=1; done
+  [ "$ours" -eq 1 ] || return 0
   [ "$0" -ef "$HOME_DIR/snapwork-hook.sh" ] 2> /dev/null || return 0
+  files=
+  [ ! -f "$HOME_DIR/snapwork-files.sh" ] || files=$(version_in files "$HOME_DIR/snapwork-files.sh")
+  newer=0
+  [ "$(kit_offered hook)" -gt "$HOOK_VERSION" ] 2> /dev/null && newer=1
+  [ -n "$files" ] && [ "$(kit_offered files)" -gt "$files" ] 2> /dev/null && newer=1
+  [ "$newer" -eq 1 ] && kit_manifest || return 0
   kit_take hook "$HOOK_VERSION"
-  [ ! -f "$HOME_DIR/snapwork-files.sh" ] || kit_take files "$(version_in files "$HOME_DIR/snapwork-files.sh")"
+  [ -z "$files" ] || kit_take files "$files"
   return 0
 }
 

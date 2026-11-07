@@ -1248,6 +1248,13 @@ while read -r kname kver ksha; do
 done < "$ROOT/tests/kit-versions"
 check "every kit script has a recorded version" 'grep -q "^snapwork-hook.sh " "$ROOT/tests/kit-versions" && grep -q "^snapwork-files.sh " "$ROOT/tests/kit-versions"'
 check "one sha per version" '[ "$(cut -d " " -f 1,2 "$ROOT/tests/kit-versions" | sort | uniq -d)" = "" ]'
+# The plugin copies its scripts into ~/.snapwork over older ones, so it must carry the newest released
+# (an older hook there would bring back what a newer one fixed: hook 7 signs its own updates).
+for kname in snapwork-hook.sh snapwork-files.sh; do
+  newest=$(sed -n "s/^$kname \([0-9][0-9]*\) .*/\1/p" "$ROOT/tests/kit-versions" | sort -n | tail -n 1)
+  have_ver=$(sed -n 's/^# snapwork-[a-z]*-version: \([0-9][0-9]*\)$/\1/p' "$SCRIPTS/$kname")
+  check "$kname: the plugin ships the newest released version ($newest)" '[ "$have_ver" = "$newest" ]'
+done
 # The plugin's own version line matches both manifests and the marketplace (it is what the room sees).
 PV=$(sed -n 's/^PLUGIN_VERSION=//p' "$SCRIPTS/snapwork-plugin.sh")
 for manifest in "$ROOT/plugins/snapwork/.claude-plugin/plugin.json" "$ROOT/plugins/snapwork/.codex-plugin/plugin.json" "$ROOT/.claude-plugin/marketplace.json"; do
