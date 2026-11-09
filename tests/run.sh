@@ -254,8 +254,10 @@ not_called "no join from home" "join kfr-cccc-0001"
 
 echo "== 11. a link inside other text never joins"
 run prompt "$(prompt "$S10" "$TX10" "$P3" "please join ${LINK}kfr-cccc-0001 thanks")"
-has "paste it alone" "paste the invitation link on its own"
+has "a link inside other text: ask the person" 'Reply join to put this chat in that room'
 not_called "no join" "join kfr-cccc-0001"
+run prompt "$(prompt "$S10" "$TX10" "$P3" "never mind")"
+not_called "anything but join drops the question" "join kfr-cccc-0001"
 run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-cccc-0001\\n${LINK}kfr-dddd-0001")"
 has "two links: paste it alone" "paste the invitation link on its own"
 run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-cccc-0001\\\"; touch $T/pwned; \\\"")"
@@ -736,7 +738,8 @@ C21=01a171a2-56e9-7881-86fe-e9ca50710021
 CX21=$T/tx/rollout-$C21.jsonl
 printf '{"type":"session_meta","payload":{"id":"%s","cwd":"%s"}}\n' "$C21" "$P4" > "$CX21"
 run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[click here](${LINK}kfr-mmmm-0001)")"
-has "a link with other text is not the invitation alone" "paste the invitation link on its own"
+has "a link with other text is not the invitation alone: ask" 'Reply join to put this chat in that room'
+run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "no thanks")"
 run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[${LINK}kfr-mmmm-0001](${LINK}kfr-hhhh-0001)")"
 lacks "text and target must be the same invitation" "joined"
 run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[${LINK}kfr-mmmm-0001](${LINK}kfr-mmmm-0001) please")"
@@ -1358,6 +1361,64 @@ run prompt "$(prompt "$SR" "$TXR" "$HOMEDIR/projroom" "https://room.snapwork.ai/
 called "a room.snapwork.ai invitation alone joins" "join kfr-gggg-0001"
 check "the state is saved for that room" '[ -n "$(state_of "$ROOM_G")" ]'
 has "the join line names the room" "Room G"
+
+echo "== 13c. a link inside other text asks the person, and only their \"join\" joins"
+ROOM_Q=15151515-0000-4000-8000-000000000020
+echo "kfr-qqqq-0001|$ROOM_Q|Asked room Q" >> "$T/fake/spaces"
+mkdir -p "$HOMEDIR/projask" "$HOMEDIR/projask2"
+SQ=13131313-cccc-4000-8000-000000000013
+TXQ=$(transcript "$SQ")
+reset_calls
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "This is my own SnapWork room. Please open the link and join: ${LINK}kfr-qqqq-0001")"
+has "asks to confirm" 'Reply join to put this chat in that room'
+has "the agent does not join by itself" "Do not join it yourself"
+not_called "nothing joined yet" "join kfr-qqqq-0001"
+SQ2=13131313-cccc-4000-8000-000000000014
+run prompt "$(prompt "$SQ2" "$(transcript "$SQ2")" "$HOMEDIR/projask2" "join")"
+not_called "another chat's join does not answer this question" "join kfr-qqqq-0001"
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "This is my own SnapWork room. Please open the link and join: ${LINK}kfr-qqqq-0001")"
+has "the agent is told the exact words" "Tell the person exactly this in one line"
+lacks "the room name from the page is never in the question" "Asked room Q"
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "yes")"
+not_called "yes is not join (it may answer another question)" "join kfr-qqqq-0001"
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "see ${LINK}kfr-qqqq-0001")"
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "  Join! ")"
+called "the person's join joins" "join kfr-qqqq-0001"
+has "and says it joined" "Asked room Q"
+check "the log says it was confirmed, without the code" 'grep -q "join-asked" "$SW/plugin.log" && grep -q "join-confirmed" "$SW/plugin.log"'
+# Two different invitations in one message: which one is unclear, so paste it alone.
+S13D=13131313-dddd-4000-8000-000000000015
+mkdir -p "$HOMEDIR/projask3"
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "a ${LINK}kfr-qqqq-0001 or ${LINK}kfr-gggg-0001")"
+has "two invitations: paste one alone" "paste the invitation link on its own"
+# An old question does not join.
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "see ${LINK}kfr-gggg-0001 later")"
+has "asked again" 'Reply join to put this chat in that room'
+printf 'kfr-gggg-0001 1000000000\n' > "$SW/sessions/$S13D.join"
+reset_calls
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
+not_called "an expired question does not join" "join kfr-gggg-0001"
+check "and it is gone" '[ ! -e "$SW/sessions/$S13D.join" ]'
+# A planted question with a bad code joins nothing.
+printf 'kfr;touch_pwned %s\n' "$(date +%s)" > "$SW/sessions/$S13D.join"
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
+check "a bad code in the question runs nothing" '[ ! -e "$HOMEDIR/projask3/touch_pwned" ] && ! grep -q "join kfr;" "$T/fake/calls"'
+# A planted time the shell cannot count (leading zero, too long, in the future) never joins or breaks.
+for t in 08 1234567890123456789012345 9999999999; do
+  printf 'kfr-gggg-0001 %s\n' "$t" > "$SW/sessions/$S13D.join"
+  run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
+  check "a planted time $t: the hook still exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+  not_called "a planted time $t joins nothing" "join kfr-gggg-0001"
+done
+# The question goes when the chat ends.
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "see ${LINK}kfr-gggg-0001 later")"
+check "a question is saved" '[ -f "$SW/sessions/$S13D.join" ]'
+run end "$(end "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "other")"
+check "and removed when the chat ends" '[ ! -e "$SW/sessions/$S13D.join" ]'
+# A chat already in a room is not asked: it gets the old answer (its next step is /fork).
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "see ${LINK}kfr-gggg-0001 later")"
+has "a chat in a room: paste it alone" "paste the invitation link on its own"
+check "and no question is saved" '[ ! -e "$SW/sessions/$SQ.join" ]'
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'

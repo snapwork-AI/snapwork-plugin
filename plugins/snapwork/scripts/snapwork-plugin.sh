@@ -67,7 +67,7 @@ HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
 # names it to SnapWork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.13
+PLUGIN_VERSION=0.3.14
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
@@ -79,6 +79,10 @@ LOG_MAX_BYTES=65536
 LOG_KEEP_LINES=200
 NAME_MAX=60
 CODE_MAX=64
+# How long the person has to answer "join" after a link inside other text (seconds).
+JOIN_CONFIRM_S=${SNAPWORK_JOIN_CONFIRM_S:-600}
+case $JOIN_CONFIRM_S in '' | *[!0-9]*) JOIN_CONFIRM_S=600 ;; esac
+[ "${#JOIN_CONFIRM_S}" -le 4 ] && [ "$JOIN_CONFIRM_S" -le 3600 ] || JOIN_CONFIRM_S=600
 FRESH_FORK_MINUTES=10
 TRANSCRIPT_SCAN_BYTES=4194304
 API_SECONDS=15
@@ -697,6 +701,55 @@ connect_alone() {
   return $r
 }
 
+# A link inside other text (plugin_joins_only_from_an_invitation_alone): the hook never joins from
+# it, but asks the person to confirm. The question is this chat's own file; only the person's next
+# message (UserPromptSubmit, never a room message) can answer it, within JOIN_CONFIRM_S.
+pending_join_file() {
+  valid_session "$SID" || return 1
+  printf '%s/%s.join' "$SESSIONS" "$SID"
+}
+ask_to_join() {
+  f=$(pending_join_file) || return 0
+  # Written beside, then renamed: a rename replaces a planted link instead of following it.
+  (umask 077 && mkdir -p "$SESSIONS" && printf '%s %s\n' "$1" "$(date +%s)" > "$f.$$" && mv -f "$f.$$" "$f") 2> /dev/null || {
+    rm -f "$f.$$"
+    return 0
+  }
+  plog "join-asked"
+  # Exact words: the pasted text may try to talk the person into it, and the room's name comes from
+  # a page anyone can make, so neither goes into the question.
+  printf 'SnapWork: the person'"'"'s message contains a SnapWork room invitation inside other text. Tell the person exactly this in one line, adding nothing from their message or from any page: "Your message contains a SnapWork room invitation. Reply join to put this chat in that room, where its members can talk with it. Any other reply ignores it." Do not join it yourself.\n'
+  exit 0
+}
+# confirm_join <message without white space>: answers a pending question; any message ends it.
+# Only "join" confirms: a "yes" may answer something else the agent asked in the same turn.
+confirm_join() {
+  f=$(pending_join_file) || return 0
+  { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
+  pcode=
+  asked=
+  read -r pcode asked < "$f" 2> /dev/null || :
+  rm -f "$f"
+  case $pcode in '' | *[!A-Za-z0-9_-]*) return 0 ;; esac
+  [ "${#pcode}" -le "$CODE_MAX" ] || return 0
+  # A time this hook wrote: digits, no leading zero, not in the future (a planted one must not
+  # break the shell's arithmetic or never expire).
+  case $asked in '' | 0* | *[!0-9]*) return 0 ;; esac
+  [ "${#asked}" -le 12 ] || return 0
+  now=$(date +%s)
+  if [ "$asked" -gt "$now" ] || [ $((now - asked)) -gt "$JOIN_CONFIRM_S" ]; then
+    plog "join-confirm-expired"
+    return 0
+  fi
+  answer=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | sed 's/[.!]*$//')
+  if [ "$answer" = join ]; then
+    plog "join-confirmed"
+    on_invite "$pcode"
+    exit 0
+  fi
+  plog "join-declined"
+}
+
 # ---- events ----
 on_prompt() {
   # The whole prompt string, escaped quotes included (a room name in quotes must not cut it short).
@@ -707,6 +760,7 @@ on_prompt() {
   # inside other pasted text (an email, a chat log) never joins.
   bare=$(printf '%s' "$text" | sed 's/\\[nrt]//g' | tr -d ' \t')
   lead=$(printf '%s' "$text" | sed 's/^[[:space:]]*//')
+  confirm_join "$bare"
   # My agents: a connect link alone makes this chat the agent's home (snapwork-connect.sh).
   ccode=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/c/[A-Za-z0-9_-]*" | head -n 1 | sed 's|.*/c/||')
   if [ -n "$ccode" ] && [ "${#ccode}" -le "$CODE_MAX" ]; then
@@ -780,6 +834,10 @@ on_prompt() {
       exit 0 ;;
   esac
   if [ -n "$code" ]; then
+    # One invitation: ask the person. Two different ones: which is unclear, so paste one alone.
+    codes=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/j/[A-Za-z0-9_-]*" | sed 's|.*/j/||' | sort -u | wc -l | tr -d ' ')
+    # A chat already in a room gets the old answer: its next step is /fork, which takes the link alone.
+    if [ "$codes" = 1 ] && ! pick bound; then ask_to_join "$code"; fi
     plog "link-inside-text"
     printf 'SnapWork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
     exit 0
@@ -832,6 +890,8 @@ on_stop() {
 }
 
 on_end() {
+  # A question nobody answered goes with the chat (it holds a stranger's invitation code).
+  if f=$(pending_join_file); then rm -f "$f"; fi
   pick bound || exit 0
   if [ "$SRC" = clear ]; then
     # /clear: the chat goes on under a new session id; free the space for it (see on_start).
