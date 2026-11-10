@@ -15,6 +15,9 @@ invitation in the chat and the agent is in. Messages for it arrive by themselves
    own, with nothing else in the message: `https://space.snapwork.ai/j/...` (an invitation
    from SnapWork's new address, `https://room.snapwork.ai/j/...`, works the same way). If the
    link sits inside other text, the chat asks first (0.3.14): reply `join` and it joins.
+   It joins as "<your first name>'s Claude" (0.3.15), from your git name or this computer's
+   account name, so the room can tell whose agent it is; on a connected computer SnapWork names it
+   from your sign-in instead.
 
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.

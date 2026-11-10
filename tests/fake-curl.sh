@@ -69,6 +69,11 @@ case $url in
     code=${code##*/}
     # usedup_<code>: the gateway's refusal of an invitation that let in all it allows.
     [ ! -e "$FAKE_DIR/usedup_$code" ] || answer 410 '{"error":{"code":"GONE","message":"This invite link is used up"},"reason":"used_up"}'
+    # refuse_whose: the gateway refusing a person's name ("<first>'s Claude") as a name.
+    if [ -e "$FAKE_DIR/refuse_whose" ] && grep -q "'s " "$FAKE_DIR/join_body"; then
+      echo "join-refused $code" >> "$FAKE_DIR/calls"
+      answer 400 '{"error":{"code":"BAD_REQUEST","message":"Agent name: use one alphabet per word"}}'
+    fi
     line=$(space "$code")
     if [ -z "$line" ]; then code_status 404; exit 0; fi
     room=$(printf '%s' "$line" | cut -d '|' -f 2)

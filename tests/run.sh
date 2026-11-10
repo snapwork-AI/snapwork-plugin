@@ -4,6 +4,9 @@
 #
 #   sh tests/run.sh                 (TEST_SH="bash --posix" sh tests/run.sh: the shell macOS runs as sh)
 set -u
+# The person's name the plugin would read from git or the account: none, unless a test sets one.
+SNAPWORK_PERSON=
+export SNAPWORK_PERSON
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PLUGIN=$ROOT/plugins/snapwork/scripts/snapwork-plugin.sh
@@ -1419,6 +1422,37 @@ check "and removed when the chat ends" '[ ! -e "$SW/sessions/$S13D.join" ]'
 run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "see ${LINK}kfr-gggg-0001 later")"
 has "a chat in a room: paste it alone" "paste the invitation link on its own"
 check "and no question is saved" '[ ! -e "$SW/sessions/$SQ.join" ]'
+
+echo "== 13c. the joining name says whose agent this is (agent_names_say_whose)"
+mkdir -p "$HOMEDIR/projwho1" "$HOMEDIR/projwho2" "$HOMEDIR/projwho3" "$HOMEDIR/projwho4" "$T/gitbin"
+W1=13131313-cccc-4000-8000-000000000001
+W2=13131313-cccc-4000-8000-000000000002
+W3=13131313-cccc-4000-8000-000000000003
+W4=13131313-cccc-4000-8000-000000000004
+joined_as() { grep -q -F "\"name\":\"$1\"" "$T/fake/join_body"; }
+SNAPWORK_PERSON="Minh Vo" run prompt "$(prompt "$W1" "$(transcript "$W1")" "$HOMEDIR/projwho1" "${LINK}kfr-dddd-0001")"
+check "the person's first name comes first" 'joined_as "Minh'"'"'s Claude"'
+has "and the agent is told to keep it in front" "Keep your person's first name in front (\"Minh's Claude\")"
+has "the rename command takes an apostrophe" 'snapwork-hook.sh --rename --room '
+has "in double quotes" '-- "<new name>"'
+# The git name this computer gives its person, when no test name stands in.
+printf '#!/bin/sh\n[ "$*" = "config --global --get user.name" ] && echo "Ana Silva"\n' > "$T/gitbin/git"
+chmod 755 "$T/gitbin/git"
+(unset SNAPWORK_PERSON; TPATH="$T/gitbin:$PATH" run prompt "$(prompt "$W2" "$(transcript "$W2")" "$HOMEDIR/projwho2" "${LINK}kfr-dddd-0001")")
+check "from git's user.name" 'joined_as "Ana'"'"'s Claude"'
+# A name SnapWork refuses joins under the app's name.
+reset_calls
+: > "$T/fake/refuse_whose"
+SNAPWORK_PERSON="Minh Vo" run prompt "$(prompt "$W3" "$(transcript "$W3")" "$HOMEDIR/projwho3" "${LINK}kfr-dddd-0001")"
+rm -f "$T/fake/refuse_whose"
+check "a refused name is tried once" 'grep -q "^join-refused kfr-dddd-0001" "$T/fake/calls"'
+check "then the app's name joins" 'joined_as "Claude" && grep -q "^join kfr-dddd-0001" "$T/fake/calls"'
+has "and the chat is in the room" "you just joined the room"
+# A connected computer joins as the app: its claim names the agent from the person's sign-in.
+printf '{"key":"not-a-computer-key"}\n' > "$SW/computer.json"
+SNAPWORK_PERSON="Minh Vo" run prompt "$(prompt "$W4" "$(transcript "$W4")" "$HOMEDIR/projwho4" "${LINK}kfr-dddd-0001")"
+rm -f "$SW/computer.json"
+check "a connected computer joins as the app" 'joined_as "Claude"'
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'
