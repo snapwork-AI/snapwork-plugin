@@ -1,12 +1,12 @@
 #!/bin/sh
-# snapwork-watch.sh: the SnapWork watcher (My agents, SnapWork M7). POSIX sh + curl only.
+# snapwork-watch.sh: the Snapwork watcher (My agents, Snapwork M7). POSIX sh + curl only.
 #
 # One per computer, started at login by a user service (snapwork-connect.sh installs it). It asks
-# SnapWork, 30 seconds at a time, whether its person added one of the agents homed on this computer
+# Snapwork, 30 seconds at a time, whether its person added one of the agents homed on this computer
 # to a space. For each add it gets: the add's id, the app, the home chat's session id, a one-use
 # invitation and the space's name as a safe label. It then copies the home chat into a new
 # background chat whose first message is the invitation, so the copy joins the space like any
-# pasted invitation (the plugin does the join), and tells SnapWork the copy's session id, or why it
+# pasted invitation (the plugin does the join), and tells Snapwork the copy's session id, or why it
 # could not start it in a fixed word (no_runtime, not_trusted, home_gone, fork_failed).
 # An agent claimed from a room (7.6) has a folder home instead: the line's 7th field says "folder"
 # and the watcher starts a fresh background chat in that folder (no copy), so no room's talk
@@ -16,7 +16,7 @@
 # id and the agent's id) whose person wants it back, because a message waits for it or they clicked
 # "Bring it back". The watcher finds the chat in its own saved connection (rooms/<space>.<agent>.json:
 # the session id and the folder), checks that it is not running, and resumes it in the background
-# with a fixed prompt. It tells SnapWork the session id, or why not in a fixed word (no_runtime,
+# with a fixed prompt. It tells Snapwork the session id, or why not in a fixed word (no_runtime,
 # not_trusted, chat_gone, busy, start_failed). The plugin's own hooks make it listen again.
 # A Codex chat (0.3.10, codex_comes_back_through_its_daemon) is resumed headless in its own
 # folder, `codex exec --skip-git-repo-check resume <chat> <the fixed prompt>` (the ChatGPT app makes
@@ -24,10 +24,10 @@
 # waits for the room. The app's own codex is used when there is no terminal one.
 #
 # Updating the plugin (7.9, plugins_update_from_the_watcher): an "update" line names an app
-# (claude-code or codex) whose SnapWork plugin on this computer is behind. The watcher runs that
+# (claude-code or codex) whose Snapwork plugin on this computer is behind. The watcher runs that
 # app's own plugin update, fixed here: Claude refreshes the snapwork marketplace, then updates the
 # plugin (never `marketplace add`, which would drop the marketplace's auto-update setting); Codex
-# upgrades the marketplace, then adds the plugin again. It tells SnapWork done, or why not in a fixed
+# upgrades the marketplace, then adds the plugin again. It tells Snapwork done, or why not in a fixed
 # word (no_runtime, update_failed). The new version loads the next time the app starts.
 #
 # What it never does: run anything but the one fork (or fresh-chat, or resume, or plugin update) command (and
@@ -35,11 +35,11 @@
 # registered (homes/<id>.json, written by the plugin when the person connected the chat), in that
 # chat's own folder as recorded here (never a folder the gateway names), with the invitation as
 # the only prompt. It never forks a chat that is in a space. A resume takes only ids and a label
-# from SnapWork: the chat and its folder come from this computer's files, the prompt is fixed here,
+# from Snapwork: the chat and its folder come from this computer's files, the prompt is fixed here,
 # and it resumes only a chat that is not running. The computer key goes to curl through
 # its config on stdin, never on a command line, and is never logged; neither are invitations.
 #
-# Exits 0 (and the service stays down) when SnapWork refuses the key: the computer was
+# Exits 0 (and the service stays down) when Snapwork refuses the key: the computer was
 # disconnected in the console. Connecting a chat again installs and starts it again.
 #
 #   SNAPWORK_HOME           default ~/.snapwork
@@ -67,8 +67,8 @@ TAB=$(printf '\t')
 # How long a plugin update may take before it counts as failed (7.9).
 UPDATE_MAX_S=${SNAPWORK_UPDATE_MAX_S:-300}
 UPDATE_PIDS=
-# The only prompt a chat brought back gets. Never text from SnapWork.
-REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
+# The only prompt a chat brought back gets. Never text from Snapwork.
+REVIVE_PROMPT='Snapwork brought you back: messages wait for you in your room. Read them and answer.'
 # A chat whose transcript changed this recently may still be running: it is not started again.
 BUSY_MINUTES=3
 # A Codex chat brought back runs on (its listener waits for the room). The watcher watches its
@@ -128,7 +128,7 @@ take_lock() {
   (umask 077 && printf '%s' "$$" > "$LOCK")
 }
 
-# send <path> <json body>: one answer to SnapWork under /computer/ (best effort); sets status.
+# send <path> <json body>: one answer to Snapwork under /computer/ (best effort); sets status.
 send() {
   key=$(field key "$COMPUTER_FILE")
   status=$(printf 'header = "Authorization: Bearer %s"\n' "$key" \
@@ -137,21 +137,21 @@ send() {
     || status=000
   key=
 }
-# report <add id> <json body>: tells SnapWork how the fork went (logged).
+# report <add id> <json body>: tells Snapwork how the fork went (logged).
 report() { send "work/$1" "$2"; wlog "report add=$(short "$1") status=$status"; }
 failed() { report "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed add=$(short "$1") why=$2"; }
-# revived <revive id> <json body>: tells SnapWork how bringing a chat back went (logged).
+# revived <revive id> <json body>: tells Snapwork how bringing a chat back went (logged).
 revived() { send "revivals/$1" "$2"; wlog "report revive=$(short "$1") status=$status"; }
 not_revived() { revived "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed revive=$(short "$1") why=$2"; }
 
-# updated <update id> <json body>: tells SnapWork how a plugin update went (logged, 7.9).
+# updated <update id> <json body>: tells Snapwork how a plugin update went (logged, 7.9).
 updated() { send "updates/$1" "$2"; wlog "report update=$(short "$1") status=$status"; }
 not_updated() { updated "$1" "{\"state\":\"failed\",\"failure\":\"$2\"}"; wlog "failed update=$(short "$1") why=$2"; }
 
-# A room's name as SnapWork sent it, safe as one argument: anything a shell or a flag would read
-# makes it "SnapWork".
+# A room's name as Snapwork sent it, safe as one argument: anything a shell or a flag would read
+# makes it "Snapwork".
 safe_label() {
-  case $1 in '' | -* | *[\"\'\`\$\\\;\&\|\<\>\(\)\{\}\*\?\[\]\~\#!]* | *[[:cntrl:]]*) printf 'SnapWork' ;; *) printf '%s' "$1" ;; esac
+  case $1 in '' | -* | *[\"\'\`\$\\\;\&\|\<\>\(\)\{\}\*\?\[\]\~\#!]* | *[[:cntrl:]]*) printf 'Snapwork' ;; *) printf '%s' "$1" ;; esac
 }
 
 # home_file <id> <kind>: the home this computer registered, or nothing. A chat home names its
@@ -223,7 +223,7 @@ start_claude() {
     report "$1" "{\"state\":\"started\",\"session_id\":\"$full\"}"
     wlog "started add=$(short "$1") session=$id8"
   else
-    # It runs and will join; SnapWork sees the join. Not reported, so not offered again either way.
+    # It runs and will join; Snapwork sees the join. Not reported, so not offered again either way.
     wlog "started add=$(short "$1") session=$id8 full-id-unknown"
   fi
 }
@@ -332,7 +332,7 @@ running() {
 
 # revive_one <revive> <runtime> <space> <agent> <label>: one revive line. Resumes the chat this
 # computer saved for that agent, in its own folder, with the fixed prompt; nothing else from
-# SnapWork reaches the command but the checked label.
+# Snapwork reaches the command but the checked label.
 revive_one() {
   valid_uuid "$1" || { wlog "bad-item"; return 0; }
   mark_starting
@@ -349,7 +349,7 @@ revive_one() {
   real=$(cd "$project" 2> /dev/null && pwd -P) || real=
   home_real=$(cd "${HOME:-/}" 2> /dev/null && pwd -P) || home_real=/
   case $real in '' | / | "$home_real") not_revived "$1" chat_gone; return 0 ;; esac
-  # The app SnapWork names must be the one this computer saved the chat as.
+  # The app Snapwork names must be the one this computer saved the chat as.
   case $2 in
     claude-code) app=claude ;;
     codex) app=codex ;;
@@ -436,7 +436,7 @@ any_home() {
   return 1
 }
 
-# update_one <update> <runtime> <version>: one "update" line (7.9). SnapWork names the app; the
+# update_one <update> <runtime> <version>: one "update" line (7.9). Snapwork names the app; the
 # commands are this watcher's own, run from ~/.snapwork (never a project folder), with no input.
 update_one() {
   valid_uuid "$1" || { wlog "bad-item"; return 0; }

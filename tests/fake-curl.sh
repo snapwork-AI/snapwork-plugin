@@ -1,5 +1,5 @@
 #!/bin/sh
-# A stand-in for curl in tests/run.sh: answers like the SnapWork gateway, never touches the network.
+# A stand-in for curl in tests/run.sh: answers like the Snapwork gateway, never touches the network.
 # Spaces come from $FAKE_DIR/spaces (lines "code|room id|space name"); every call is logged to
 # $FAKE_DIR/calls as "join <code>", "lookup <code>", "hook <room>", "away <room>",
 # "stop <room>", "start <room>" or "status <room>". A key on the command line is logged as

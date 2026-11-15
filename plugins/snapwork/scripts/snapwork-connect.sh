@@ -1,7 +1,7 @@
-# snapwork-connect.sh: sourced by snapwork-plugin.sh (not run by itself). My agents (SnapWork M7).
+# snapwork-connect.sh: sourced by snapwork-plugin.sh (not run by itself). My agents (Snapwork M7).
 #
 # A message that is only a connect link (https://space.snapwork.ai/c/<code>, made in the console's
-# My agents) makes this chat the agent's home: SnapWork remembers this chat's session id and folder,
+# My agents) makes this chat the agent's home: Snapwork remembers this chat's session id and folder,
 # and from then on the person adds the agent to any space they are in from the console. For each
 # space, the watcher on this computer (snapwork-watch.sh) copies this chat into a new background
 # chat whose first message is that space's one-use invitation; the copy joins like any pasted
@@ -15,7 +15,7 @@
 #   $SNAPWORK_HOME/snapwork-watch.sh a copy of the watcher, started at login by a user service:
 #                                    macOS ~/Library/LaunchAgents/ai.snapwork.watch.plist,
 #                                    Linux ~/.config/systemd/user/snapwork-watch.service
-# Connecting takes two pastes of the same link: the first only looks it up and says whose SnapWork
+# Connecting takes two pastes of the same link: the first only looks it up and says whose Snapwork
 # account it belongs to (name and an email hint), because connecting lets that account start
 # copies of this chat in its spaces; pasting it again in the same chat within 10 minutes connects.
 # A link someone else made can never connect a chat by one careless paste.
@@ -53,7 +53,7 @@ CONFIRM_SECONDS=600
 
 connect_fail() {
   plog "connect-failed why=$2"
-  printf 'SnapWork: could not connect this chat: %s. Tell the person this in one line.\n' "$1"
+  printf 'Snapwork: could not connect this chat: %s. Tell the person this in one line.\n' "$1"
   exit 0
 }
 
@@ -135,10 +135,10 @@ on_connect() {
     404) connect_fail "this connect link was not found; make a new one in My agents" not-found ;;
     410) connect_fail "this connect link was used or has expired; make a new one in My agents" gone ;;
     400) connect_fail "this link was made for another app; make one for this app in My agents" other-app ;;
-    403) connect_fail "this computer is connected to another SnapWork account" other-account ;;
+    403) connect_fail "this computer is connected to another Snapwork account" other-account ;;
     409) connect_fail "a limit was reached (agents or computers); remove one in My agents, then make a new link" limit ;;
     429) connect_fail "too many tries; wait a few minutes and paste a new link" rate ;;
-    *) connect_fail "SnapWork answered $status" "status-$status" ;;
+    *) connect_fail "Snapwork answered $status" "status-$status" ;;
   esac
   reply=$WORK/connect.json
   agent_id=$(grep -o '"agent":{"id":"[^"]*"' "$reply" | head -n 1 | sed 's/.*"id":"//;s/"$//')
@@ -161,7 +161,7 @@ on_connect() {
   install_watcher
   claim_all
   plog "connected agent=$(printf '%s' "$agent_id" | cut -c 1-8) watcher=$WATCH_NOTE"
-  printf 'SnapWork: connected. This chat is now the home of "%s" on this computer. From My agents in the SnapWork console, add "%s" to any room you are in: each room gets its own copy of this chat, started in the background, and this chat stays as it is.%s Tell the person this in one line.\n' \
+  printf 'Snapwork: connected. This chat is now the home of "%s" on this computer. From My agents in the Snapwork console, add "%s" to any room you are in: each room gets its own copy of this chat, started in the background, and this chat stays as it is.%s Tell the person this in one line.\n' \
     "$agent_name" "$agent_name" "$(watch_note_text)"
   exit 0
 }
@@ -181,7 +181,7 @@ home_id_of() {
 
 # claim_state <room connection file>: makes that room's agent this computer's person's agent, with
 # its project folder as its home. Silent on stdout (the hook's output goes to the chat); never
-# fails the caller. Marks the connection "claimed" once SnapWork has answered for good.
+# fails the caller. Marks the connection "claimed" once Snapwork has answered for good.
 claim_state() {
   cl_state=$1
   { [ -f "$COMPUTER_FILE" ] && [ ! -L "$COMPUTER_FILE" ]; } || return 0
@@ -240,7 +240,7 @@ claim_state() {
       plog "claim-already status=200"
       set_line "$cl_state" claimed "$cl_home" || true ;;
     404 | 409 | 422)
-      # Final answers: not this person's to claim, or not an app SnapWork claims. Never asked again.
+      # Final answers: not this person's to claim, or not an app Snapwork claims. Never asked again.
       plog "claim-refused status=$cl_status"
       set_line "$cl_state" claimed refused || true ;;
     *)
@@ -337,7 +337,7 @@ ask_to_confirm() {
     404) connect_fail "this connect link was not found; make a new one in My agents" not-found ;;
     410) connect_fail "this connect link was used or has expired; make a new one in My agents" gone ;;
     429) connect_fail "too many tries; wait a few minutes and paste a new link" rate ;;
-    *) connect_fail "SnapWork answered $status" "lookup-$status" ;;
+    *) connect_fail "Snapwork answered $status" "lookup-$status" ;;
   esac
   name=$(safe "$(grep -o '"name":"[^"]*"' "$WORK/lookup.json" | head -n 1 | sed 's/^"name":"//;s/"$//')")
   email=$(safe "$(grep -o '"email":"[^"]*"' "$WORK/lookup.json" | head -n 1 | sed 's/^"email":"//;s/"$//')")
@@ -348,7 +348,7 @@ ask_to_confirm() {
   hash=$(printf '%s' "$1" | sha_of) || connect_fail "this computer has no sha256sum or shasum" no-sha
   write_owner_only "$PENDING" "$hash $SID $(date +%s)" || connect_fail "cannot remember the link" no-save
   plog "connect-asked"
-  printf 'SnapWork: this connect link belongs to the SnapWork account "%s"%s. Connecting lets that account start copies of this chat, working in this project folder, in its rooms. If that is your own account, paste the same link again to connect this chat; if not, do nothing. Tell the person exactly this; do not paste it yourself.\n' \
+  printf 'Snapwork: this connect link belongs to the Snapwork account "%s"%s. Connecting lets that account start copies of this chat, working in this project folder, in its rooms. If that is your own account, paste the same link again to connect this chat; if not, do nothing. Tell the person exactly this; do not paste it yourself.\n' \
     "${name:-Unknown}" "${email:+ ($email)}"
   exit 0
 }
@@ -402,7 +402,7 @@ install_systemd() {
   [ ! -L "$unit" ] || return 1
   (umask 077 && cat > "$unit.$$" << EOF
 [Unit]
-Description=SnapWork watcher: starts a copy of your agent's home chat when you add it to a room
+Description=Snapwork watcher: starts a copy of your agent's home chat when you add it to a room
 
 [Service]
 ExecStart=/bin/sh "$WATCH_SCRIPT"

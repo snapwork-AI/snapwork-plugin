@@ -1,5 +1,5 @@
 #!/bin/sh
-# Local tests for My agents (SnapWork M7): the connect link in a chat (snapwork-connect.sh through
+# Local tests for My agents (Snapwork M7): the connect link in a chat (snapwork-connect.sh through
 # snapwork-plugin.sh) and the watcher (snapwork-watch.sh), with a temporary HOME, a fake curl
 # (tests/fake-curl.sh) and a fake claude, so nothing reaches the gateway or starts a session.
 #
@@ -128,7 +128,7 @@ TX3=$(transcript "$S3")
 
 echo "== 0. the first paste only says whose account the link is"
 run prompt "$(prompt "$S1" "$TX1" "$P1" "${CONNECT}kfr-cccc-0001")"
-has "names the account" "belongs to the SnapWork account \"Minh Vo\" (m"
+has "names the account" "belongs to the Snapwork account \"Minh Vo\" (m"
 has "says what connecting allows" "start copies of this chat, working in this project folder, in its rooms"
 has "says how to confirm" "paste the same link again to connect this chat"
 called "looked it up" "connect-lookup kfr-cccc-0001"
@@ -136,7 +136,7 @@ not_called "nothing connected yet" "connect kfr-cccc-0001"
 check "nothing saved yet" '[ ! -f "$SW/computer.json" ]'
 run prompt "$(prompt "$S2" "$TX2" "$P2" "${CONNECT}kfr-cccc-0001")"
 not_called "another chat's paste does not confirm" "connect kfr-cccc-0001"
-has "it is asked again" "belongs to the SnapWork account"
+has "it is asked again" "belongs to the Snapwork account"
 
 echo "== 1. the same link again in the same chat makes it the agent's home"
 reset
@@ -169,7 +169,7 @@ CONNECT=https://room.snapwork.ai/c/
 connect "$S2" "$TX2" "$P2" kfr-cccc-0099
 CONNECT=$KEPT_CONNECT
 has "connected from the new address" "connected."
-called "the connect went to SnapWork" "connect kfr-cccc-0099"
+called "the connect went to Snapwork" "connect kfr-cccc-0099"
 
 echo "== 3. a disconnected computer's key: connected again as a new computer"
 reset
@@ -179,7 +179,7 @@ has "connected" "connected."
 check "two connect calls (with the key, then without)" '[ "$(grep -c "^connect kfr-cccc-0003" "$T/fake/calls")" = 2 ]'
 
 echo "== 4. refusals say what to do"
-for pair in "404|was not found" "410|was used or has expired" "403|another SnapWork account" "409|a limit was reached" "400|made for another app" "500|SnapWork answered 500"; do
+for pair in "404|was not found" "410|was used or has expired" "403|another Snapwork account" "409|a limit was reached" "400|made for another app" "500|Snapwork answered 500"; do
   reset
   printf '%s' "${pair%%|*}" > "$T/fake/connect_status"
   connect "$S3" "$TX3" "$P2" kfr-cccc-0004
@@ -259,7 +259,7 @@ not_called "and not reported" "report $ADD1"
 reset
 work_line "$ADD1" "$S1" "${INVITE}kfr-bbbb-0001" '-rf $(touch pwned)'
 watch
-check "a name a shell would read is replaced" 'grep -q -F " |--name |SnapWork |" "$T/fake/claude_calls"'
+check "a name a shell would read is replaced" 'grep -q -F " |--name |Snapwork |" "$T/fake/claude_calls"'
 check "nothing ran from the name" '[ ! -e "$P1/pwned" ] && [ ! -e "$HOMEDIR/pwned" ]'
 reset
 printf 'start\t%s\tcodex\t%s\t%s\tDesign\n' "$ADD1" "$S1" "${INVITE}kfr-bbbb-0001" > "$T/fake/work_lines"
@@ -474,7 +474,7 @@ RV=e7e7e7e7-0000-4000-8000-000000000001
 RSP=bbbbbbbb-0000-4000-8000-000000000011
 RAG=00000000-0000-4000-8000-0000000000e1
 RS=abcdef01-aaaa-4000-8000-0000000000e1
-REVIVE_PROMPT='SnapWork brought you back: messages wait for you in your room. Read them and answer.'
+REVIVE_PROMPT='Snapwork brought you back: messages wait for you in your room. Read them and answer.'
 # room_file <path> <session> <project> [<app>] [<agent id>]: a connection as the plugin saves it.
 room_file() {
   printf '{\n  "session": "%s",\n  "app": "%s",\n  "setup": "x",\n  "project": "%s",\n  "gateway": "https://space.snapwork.ai",\n  "roomId": "%s",\n  "agentId": "%s",\n  "spaceName": "Room R",\n  "agentName": "Claude",\n  "key": "testkeyrevive"\n}\n' \
@@ -496,7 +496,7 @@ check "one chat started" '[ "$(wc -l < "$T/fake/claude_calls" | tr -d " ")" = 1 
 check "in the chat's own folder" 'grep -q "^cwd=$P1 " "$T/fake/claude_calls"'
 check "with the PATH its home recorded" 'grep -q " path=$T/bin:" "$T/fake/claude_calls"'
 check "the resume command, exactly: the saved chat, the label, the fixed prompt" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |Room R |$REVIVE_PROMPT" ]'
-check "no id from SnapWork reaches the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" "$T/fake/claude_calls"'
+check "no id from Snapwork reaches the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" "$T/fake/claude_calls"'
 called "reported started with the chat's id" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
 not_called "not reported as an add" "report $RV"
 check "the poll says the watcher knows Codex revivals too (v=0.3.13)" 'grep -q "[?&]v=0.3.13$" "$T/fake/work_url"'
@@ -511,7 +511,7 @@ echo "== 11a. what a revive line can and cannot change"
 reset
 revive_line "$RV" "$RSP" "$RAG" '-rf $(touch pwned)'
 watch
-check "a label a shell or a flag would read is replaced" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |SnapWork |$REVIVE_PROMPT" ]'
+check "a label a shell or a flag would read is replaced" '[ "$(claude_args)" = " |--resume |$RS |--bg |--name |Snapwork |$REVIVE_PROMPT" ]'
 check "nothing ran from the label" '[ ! -e "$P1/pwned" ] && [ ! -e "$HOMEDIR/pwned" ]'
 reset
 printf 'revive\t%s\tclaude-code\t%s\t%s\tRoom R\tsomething new\n' "$RV" "$RSP" "$RAG" > "$T/fake/work_lines"
@@ -618,7 +618,7 @@ reset
 revive_line "$RV" "$RSP" "$RAG" "Room R" codex
 watch
 nothing_ran "a Codex line for a chat saved as Claude's"
-revival "the app SnapWork names must be the chat's own" no_runtime
+revival "the app Snapwork names must be the chat's own" no_runtime
 reset
 room_file "$RSTATE" "$RS" "$P1" codex
 revive_line "$RV" "$RSP" "$RAG" "Room R"
@@ -759,7 +759,7 @@ check "one start, no claude" '[ "$(wc -l < "$T/fake/codex_calls" | tr -d " ")" =
 check "in the chat's own folder" 'grep -q "^cwd=$P1 " "$T/fake/codex_calls"'
 check "the command, exactly: the saved chat resumed headless with the fixed prompt" '[ "$(codex_args)" = " |exec |--skip-git-repo-check |resume |$RS |$REVIVE_PROMPT" ]'
 check "nothing the chat prints is kept on disk" '! grep -rq "session id:" "$SW" 2> /dev/null'
-check "no id from SnapWork and no label reach the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" -e "Room R" "$T/fake/codex_calls"'
+check "no id from Snapwork and no label reach the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" -e "Room R" "$T/fake/codex_calls"'
 called "reported started with the chat's id" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
 check "logged with short ids only" 'grep -q "started revive=e7e7e7e7 session=abcdef01" "$SW/watch.log" && ! grep -q "$RS" "$SW/watch.log"'
 check "the chat is still running when the watcher has reported (its listener waits)" 'ps -A -o args= | grep -v grep | grep -q "exec --skip-git-repo-check resume $RS"'
@@ -849,7 +849,7 @@ has "connected" "connected."
 check "nor by a connect" 'grep -q "^VERSION=0.3.99$" "$SW/snapwork-watch.sh" && grep -q "watcher-kept version=0.3.99" "$SW/plugin.log"'
 set_watch_version 0.3.13
 
-echo "== 11j. the watcher updates the SnapWork plugin (7.9, plugins_update_from_the_watcher)"
+echo "== 11j. the watcher updates the Snapwork plugin (7.9, plugins_update_from_the_watcher)"
 UP=f1f1f1f1-0000-4000-8000-000000000001
 update_line() { printf 'update\t%s\t%s\t%s\n' "$1" "$2" "$3" > "$T/fake/work_lines"; }
 reset

@@ -106,10 +106,10 @@ auto_update() {
       off="To turn this off: /plugin, then Marketplaces, then snapwork in Claude Code, or set \"autoUpdate\": false on the snapwork entry in $where."
       if [ "$again" -eq 1 ]; then
         plog "auto-update-again file=${res#on } tool=$tool"
-        AUTO_NOTE="SnapWork turned automatic updates for the snapwork plugin in Claude back on: adding the snapwork marketplace again had turned them off. $off Tell the person this too, in one more line."
+        AUTO_NOTE="Snapwork turned automatic updates for the snapwork plugin in Claude back on: adding the snapwork marketplace again had turned them off. $off Tell the person this too, in one more line."
       else
         plog "auto-update-on file=${res#on } tool=$tool"
-        AUTO_NOTE="SnapWork also turned on automatic updates for the snapwork plugin in Claude (once), so new versions of snapwork arrive by themselves and load the next time Claude starts. $off Tell the person this too, in one more line."
+        AUTO_NOTE="Snapwork also turned on automatic updates for the snapwork plugin in Claude (once), so new versions of snapwork arrive by themselves and load the next time Claude starts. $off Tell the person this too, in one more line."
       fi ;;
     already-on)
       [ "$again" -eq 1 ] || { auto_mark "on already"; plog "auto-update-skip why=already-on"; } ;;
@@ -191,7 +191,7 @@ expected = copy.deepcopy(data)
 entry(expected, where)["autoUpdate"] = True
 tmps = []
 try:
-    # The first backup is the file as it was before SnapWork ever changed it: kept, never replaced.
+    # The first backup is the file as it was before Snapwork ever changed it: kept, never replaced.
     if not os.path.lexists(path + ".snapwork-bak"):
         fd, tmp = tempfile.mkstemp(dir=folder, prefix=".snapwork-bak.")
         tmps.append(tmp)
@@ -297,7 +297,7 @@ const tmps = [];
 const tmpName = (prefix) => path.join(folder, `${prefix}${crypto.randomBytes(8).toString("hex")}`);
 try {
   let tmp;
-  // The first backup is the file as it was before SnapWork ever changed it: kept, never replaced.
+  // The first backup is the file as it was before Snapwork ever changed it: kept, never replaced.
   if (!isLink(`${file}.snapwork-bak`) && !fs.existsSync(`${file}.snapwork-bak`)) {
     tmp = tmpName(".snapwork-bak.");
     tmps.push(tmp);

@@ -4,7 +4,7 @@ description: Send something from this conversation, or a file from this folder, 
 ---
 The person wants something sent to this chat's snapwork space: the text after this skill says
 what, often by pointing at your conversation. The snapwork plugin already handled this before you
-saw it. Its result is the line starting with "SnapWork:" in your context for this message: follow
+saw it. Its result is the line starting with "Snapwork:" in your context for this message: follow
 it, and end your final answer with one ```snapwork block holding the message. To send a file,
 the block's first line is attach: <its path in this folder> and the rest is the note.
 

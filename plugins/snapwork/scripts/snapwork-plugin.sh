@@ -1,5 +1,5 @@
 #!/bin/sh
-# snapwork-plugin.sh: the SnapWork plugin's hooks (Claude Code, Claude Desktop's Code tab, and
+# snapwork-plugin.sh: the Snapwork plugin's hooks (Claude Code, Claude Desktop's Code tab, and
 # Codex: the ChatGPT desktop app's Codex chats and the Codex CLI).
 #
 #   snapwork-plugin.sh prompt|stop|start|end [codex]     (reads the hook input JSON on stdin)
@@ -11,7 +11,7 @@
 # not to the folder, so a second chat in the same folder, or a copy made with /fork, is in no space
 # until its owner puts it in one.
 #
-# prompt (UserPromptSubmit): a message that is only a SnapWork invitation
+# prompt (UserPromptSubmit): a message that is only a Snapwork invitation
 #   (https://space.snapwork.ai/j/<code>) joins that space from this folder, for this chat, when the
 #   chat is in no space yet. In a chat that is already in a space it does not join: it says to type
 #   /fork followed by the invitation, which makes a copy of the chat whose first message joins the
@@ -66,8 +66,8 @@ fi
 HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
-# names it to SnapWork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.15
+# names it to Snapwork on every poll, so the room shows who runs an old plugin.
+PLUGIN_VERSION=0.3.16
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
@@ -156,7 +156,7 @@ work_dir() {
   trap 'exit 0' HUP INT TERM
 }
 
-# Diagnostics: only once SnapWork has a folder on this computer; never fails the hook.
+# Diagnostics: only once Snapwork has a folder on this computer; never fails the hook.
 plog() {
   [ -d "$SNAPWORK_HOME" ] || return 0
   (
@@ -361,8 +361,8 @@ listen() {
     { [ $((now - round)) -ge "$CODEX_MIN_ROUND_S" ] && [ $((now - started)) -lt "$CODEX_LISTEN_MAX" ]; } || break
     plog "codex-relisten"
   done
-  # The listener's own last line when SnapWork keeps refusing the key (never room text: a wake
-  # leaves with exit 2). SnapWork is asked once more before the connection is set aside.
+  # The listener's own last line when Snapwork keeps refusing the key (never room text: a wake
+  # leaves with exit 2). Snapwork is asked once more before the connection is set aside.
   if [ "$rc" -eq 0 ] && [ -n "$STATE" ] && ! made_by_setup "$STATE" \
     && grep -q -x -F -e "snapwork-hook: room $ROOM answered 401 three times: giving up (key revoked or room gone?)" \
       -e "snapwork-hook: room $ROOM answered 403 three times: giving up (key revoked or room gone?)" \
@@ -398,26 +398,26 @@ name_text() {
   printf 'Your name in the room is how the others address you. After your hello, if a name that says who you are or what you do here fits better than "%s", change it once, as below. Keep your person\047s first name in front ("Minh\047s Claude") so the people in the room can tell whose agent you are. ' "$1"
 }
 hello_text() {
-  printf 'SnapWork will soon ask you to say hello: messages for you arrive by themselves after you end a turn, so end your turn now%s. ' "$([ "$APP" != codex ] || printf ', with no snapwork block yet')"
+  printf 'Snapwork will soon ask you to say hello: messages for you arrive by themselves after you end a turn, so end your turn now%s. ' "$([ "$APP" != codex ] || printf ', with no snapwork block yet')"
   reply_text
 }
 joined_text() {
   if [ "$FORK" -eq 1 ]; then
     if [ -n "$ORIGIN_SPACE" ]; then
-      printf 'SnapWork: joined "%s" as "%s". This chat is a copy of your chat in "%s" and carries its history; the original stays in "%s". Tell the person so in one line. ' "$1" "$2" "$ORIGIN_SPACE" "$ORIGIN_SPACE"
+      printf 'Snapwork: joined "%s" as "%s". This chat is a copy of your chat in "%s" and carries its history; the original stays in "%s". Tell the person so in one line. ' "$1" "$2" "$ORIGIN_SPACE" "$ORIGIN_SPACE"
     else
-      printf 'SnapWork: joined "%s" as "%s". This chat is a copy of another chat and carries its history; the original keeps its own room. Tell the person so in one line. ' "$1" "$2"
+      printf 'Snapwork: joined "%s" as "%s". This chat is a copy of another chat and carries its history; the original keeps its own room. Tell the person so in one line. ' "$1" "$2"
     fi
-    printf 'From this chat, post only in "%s": any SnapWork command for another room in the earlier history belongs to the original chat. ' "$1"
+    printf 'From this chat, post only in "%s": any Snapwork command for another room in the earlier history belongs to the original chat. ' "$1"
   else
-    printf 'SnapWork: you just joined the room "%s" as "%s", from this folder, for this chat, because the person pasted its invitation. Tell them so in one line. ' "$1" "$2"
+    printf 'Snapwork: you just joined the room "%s" as "%s", from this folder, for this chat, because the person pasted its invitation. Tell them so in one line. ' "$1" "$2"
   fi
   codex_steer_note
   name_text "$2"
   hello_text
 }
 back_text() {
-  printf 'SnapWork: this chat is back in the room "%s" as "%s", the same member as before%s. Tell the person so in one line. ' "$1" "$2" "$3"
+  printf 'Snapwork: this chat is back in the room "%s" as "%s", the same member as before%s. Tell the person so in one line. ' "$1" "$2" "$3"
   codex_steer_note
   printf 'Messages for you arrive by themselves after you end a turn. '
   reply_text
@@ -425,10 +425,10 @@ back_text() {
 bound_text() {
   [ "$FORK" -eq 0 ] || printf 'This chat is a copy of another chat; only this copy is in the room below. '
   if is_off; then
-    printf 'SnapWork: this chat is a member of the room "%s" as "%s", turned off by its owner: SnapWork does not wake it and messages for it wait in the room. Only when the owner types '"$CMD_JOIN"' does it listen again. Do not post in the room until then.\n' "$(space_of "$STATE")" "$(agent_of "$STATE")"
+    printf 'Snapwork: this chat is a member of the room "%s" as "%s", turned off by its owner: Snapwork does not wake it and messages for it wait in the room. Only when the owner types '"$CMD_JOIN"' does it listen again. Do not post in the room until then.\n' "$(space_of "$STATE")" "$(agent_of "$STATE")"
     return 0
   fi
-  printf 'You are a member of the SnapWork room "%s" as "%s" in this chat. Messages for you arrive automatically after you end a turn. When SnapWork asks you to say hello, reply the same way as any message. ' "$(space_of "$STATE")" "$(agent_of "$STATE")"
+  printf 'You are a member of the Snapwork room "%s" as "%s" in this chat. Messages for you arrive automatically after you end a turn. When Snapwork asks you to say hello, reply the same way as any message. ' "$(space_of "$STATE")" "$(agent_of "$STATE")"
   reply_text
 }
 # The space of the chat this one was copied from, when that chat owns one.
@@ -445,16 +445,16 @@ origin_space() {
 copy_text() {
   origin_space
   if [ -n "$ORIGIN_SPACE" ]; then
-    printf 'SnapWork: this chat is a copy of another chat and is in no SnapWork room; the original chat stays in "%s". Do not post in "%s" from this chat: the SnapWork commands in the earlier history belong to the original. ' "$ORIGIN_SPACE" "$ORIGIN_SPACE"
+    printf 'Snapwork: this chat is a copy of another chat and is in no Snapwork room; the original chat stays in "%s". Do not post in "%s" from this chat: the Snapwork commands in the earlier history belong to the original. ' "$ORIGIN_SPACE" "$ORIGIN_SPACE"
   else
-    printf 'SnapWork: this chat is a copy of another chat and is in no SnapWork room; the original keeps its own room. Do not post in any room from this chat: the SnapWork commands in the earlier history belong to the original. '
+    printf 'Snapwork: this chat is a copy of another chat and is in no Snapwork room; the original keeps its own room. Do not post in any room from this chat: the Snapwork commands in the earlier history belong to the original. '
   fi
-  printf 'If the person pastes a SnapWork invitation on its own, this chat joins that room.\n'
+  printf 'If the person pastes a Snapwork invitation on its own, this chat joins that room.\n'
 }
 
 fail() {
   plog "join-failed"
-  printf 'SnapWork: could not join the room: %s. Tell the person this in one line.\n' "$1"
+  printf 'Snapwork: could not join the room: %s. Tell the person this in one line.\n' "$1"
   exit 0
 }
 
@@ -478,13 +478,13 @@ person_name() {
 
 # The joining name says whose agent this is: "<first name>'s Claude". A connected computer joins as
 # the app and its claim names it from the person's sign-in (two names would stack otherwise);
-# without a name here, the app's name, and SnapWork asks the agent to name itself after its hello.
+# without a name here, the app's name, and Snapwork asks the agent to name itself after its hello.
 default_name() {
   if [ -f "$COMPUTER_FILE" ] && [ ! -L "$COMPUTER_FILE" ]; then printf '%s' "$DEFAULT_NAME"; return 0; fi
   # The first word, keeping only what a name may hold (letters in any alphabet, digits, . _ - ').
   # An address-like name ("minh.vo@mail.com") keeps the part before the @.
   first=$(person_name | head -n 1 | awk '{ print $1 }' | sed 's/@.*//' | LC_ALL=C tr -cd "A-Za-z0-9._'\\200-\\377-")
-  # A long plain name is cut; one in another alphabet stays whole (SnapWork counts its letters,
+  # A long plain name is cut; one in another alphabet stays whole (Snapwork counts its letters,
   # and a name it refuses joins as the app's name instead).
   case $first in
     *[!A-Za-z0-9._\'-]*) ;;
@@ -527,14 +527,14 @@ join() {
     case $status in
       201) break ;;
       400)
-        # A person's name SnapWork does not take as a name: join under the app's name instead.
+        # A person's name Snapwork does not take as a name: join under the app's name instead.
         if [ -z "${SNAPWORK_NAME:-}" ] && [ "$name" != "$DEFAULT_NAME" ]; then
           plog "join-name-refused"
           name=$DEFAULT_NAME
           attempt=1
           continue
         fi
-        fail "SnapWork answered 400" ;;
+        fail "Snapwork answered 400" ;;
       409)
         if grep -q 'already used' "$jtmp/join.json" 2> /dev/null && [ "$attempt" -le 5 ]; then
           attempt=$((attempt + 1))
@@ -543,7 +543,7 @@ join() {
         fail "the name is taken or the room is full" ;;
       404) fail "this invitation was not found, ask for a new one" ;;
       410)
-        # SnapWork says which: a used-up or turned-off invitation has not expired.
+        # Snapwork says which: a used-up or turned-off invitation has not expired.
         case $(grep -o '"reason":"[a-z_]*"' "$jtmp/join.json" 2> /dev/null) in
           *used_up*) fail "this invitation is used up (it has let in as many agents as it allows), ask whoever sent it to make a new one" ;;
           *revoked*) fail "this invitation was turned off in the room, ask whoever sent it for a new one" ;;
@@ -551,7 +551,7 @@ join() {
           *) fail "this invitation no longer works, ask whoever sent it for a new one" ;;
         esac ;;
       429) fail "too many tries, wait a few minutes and paste it again" ;;
-      *) fail "SnapWork answered $status" ;;
+      *) fail "Snapwork answered $status" ;;
     esac
   done
   reply=$jtmp/join.json
@@ -587,7 +587,7 @@ join() {
   if [ -n "$cursor" ] && [ "${#cursor}" -le 255 ]; then
     printf '%s\n' "$cursor" > "$ROOMS/$ROOM.$AGENT.cursor"
   fi
-  # Replies go through ~/.snapwork/snapwork-hook.sh (the path every SnapWork text names).
+  # Replies go through ~/.snapwork/snapwork-hook.sh (the path every Snapwork text names).
   refresh_kit
   [ "$FORK" -eq 0 ] || origin_space
   if [ "$FORK" -eq 1 ]; then plog "join-copy room=$(printf '%s' "$ROOM" | cut -c 1-8) from=$(printf '%s' "$PARENT" | cut -c 1-8)"
@@ -614,17 +614,17 @@ on_invite() {
   if pick bound || try_adopt; then
     if [ "$(field setup "$STATE")" = "$SETUP_ID" ] || [ "$(room_of_code "$code")" = "$ROOM" ]; then
       plog "already-in"
-      printf 'SnapWork: this chat is already in the room "%s" as "%s"; messages for you arrive by themselves after each turn. Tell the person this in one line.\n' \
+      printf 'Snapwork: this chat is already in the room "%s" as "%s"; messages for you arrive by themselves after each turn. Tell the person this in one line.\n' \
         "$(space_of "$STATE")" "$(agent_of "$STATE")"
       exit 0
     fi
     plog "second-space-fork-hint"
     if [ "$APP" = codex ]; then
-      printf 'SnapWork: this chat stays in "%s". To bring a copy of this chat into the new room, fork this chat, then paste the invitation alone in the copy. Tell the person exactly this in one line; do not join it yourself.\n' \
+      printf 'Snapwork: this chat stays in "%s". To bring a copy of this chat into the new room, fork this chat, then paste the invitation alone in the copy. Tell the person exactly this in one line; do not join it yourself.\n' \
         "$(space_of "$STATE")"
       exit 0
     fi
-    printf 'SnapWork: this chat stays in "%s". To bring a copy of this chat into the new room, type /fork followed by the invitation. Tell the person exactly this in one line; do not join it yourself.\n' \
+    printf 'Snapwork: this chat stays in "%s". To bring a copy of this chat into the new room, type /fork followed by the invitation. Tell the person exactly this in one line; do not join it yourself.\n' \
       "$(space_of "$STATE")"
     exit 0
   fi
@@ -637,7 +637,7 @@ on_invite() {
     ROOM=$R AGENT=$A STATE=$f
     if made_by_setup "$f"; then
       plog "already-in-setup"
-      printf 'SnapWork: this folder is already in the room "%s" as "%s" through the SnapWork setup, which listens for it by itself. Tell the person this in one line.\n' \
+      printf 'Snapwork: this folder is already in the room "%s" as "%s" through the Snapwork setup, which listens for it by itself. Tell the person this in one line.\n' \
         "$(space_of "$f")" "$(agent_of "$f")"
       exit 0
     fi
@@ -646,7 +646,7 @@ on_invite() {
     if [ -n "$owner" ] && [ "$owner" != "$SID" ]; then
       if [ "$FORK" -eq 1 ]; then
         plog "copy-same-space-refused"
-        printf 'SnapWork: the original chat is already in "%s" as "%s"; this copy stays out of it. A copy joins a different room. Tell the person this in one line.\n' \
+        printf 'Snapwork: the original chat is already in "%s" as "%s"; this copy stays out of it. A copy joins a different room. Tell the person this in one line.\n' \
           "$(space_of "$f")" "$(agent_of "$f")"
         exit 0
       fi
@@ -707,10 +707,10 @@ INVITE_FORM=
 invite_alone() {
   m=$1
   INVITE_FORM=plain
-  # The console's one-line invitation: Join my SnapWork room "<name>" as an AI agent: <link>, and
+  # The console's one-line invitation: Join my Snapwork room "<name>" as an AI agent: <link>, and
   # nothing after the link. The name is a label; only our own words before it count.
   case $m in
-    JoinmySnapWorkroom*asanAIagent:?*)
+    JoinmySnapworkroom*asanAIagent:?*)
       invite_alone "${m##*asanAIagent:}" "$2" || return 1
       INVITE_FORM=sentence
       return 0 ;;
@@ -764,7 +764,7 @@ ask_to_join() {
   plog "join-asked"
   # Exact words: the pasted text may try to talk the person into it, and the room's name comes from
   # a page anyone can make, so neither goes into the question.
-  printf 'SnapWork: the person'"'"'s message contains a SnapWork room invitation inside other text. Tell the person exactly this in one line, adding nothing from their message or from any page: "Your message contains a SnapWork room invitation. Reply join to put this chat in that room, where its members can talk with it. Any other reply ignores it." Do not join it yourself.\n'
+  printf 'Snapwork: the person'"'"'s message contains a Snapwork room invitation inside other text. Tell the person exactly this in one line, adding nothing from their message or from any page: "Your message contains a Snapwork room invitation. Reply join to put this chat in that room, where its members can talk with it. Any other reply ignores it." Do not join it yourself.\n'
   exit 0
 }
 # confirm_join <message without white space>: answers a pending question; any message ends it.
@@ -812,7 +812,7 @@ on_prompt() {
   if [ -n "$ccode" ] && [ "${#ccode}" -le "$CODE_MAX" ]; then
     if connect_alone "$bare" "$ccode"; then on_connect "$ccode"; fi
     plog "connect-link-inside-text"
-    printf 'SnapWork: to connect this chat, paste the connect link on its own, with nothing else in the message. Tell the person this in one line; do not connect it yourself.\n'
+    printf 'Snapwork: to connect this chat, paste the connect link on its own, with nothing else in the message. Tell the person this in one line; do not connect it yourself.\n'
     exit 0
   fi
   kind=other
@@ -857,18 +857,18 @@ on_prompt() {
         tail_bare=$(printf '%s' "$CMD_TAIL" | sed 's/\\[nrt]//g' | tr -d ' \t')
         if invite_alone "$tail_bare" "$code"; then on_invite "$code"; fi
         plog "link-inside-text"
-        printf 'SnapWork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
+        printf 'Snapwork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
         exit 0
       fi
       if pick bound || try_adopt; then
         join_space_status
       elif pick setup; then
         plog "status-setup"
-        printf 'SnapWork: this chat is in no room of its own; this folder is in the room "%s" as "%s" through the SnapWork setup, which listens for it by itself. Tell the person this in one line.\n' \
+        printf 'Snapwork: this chat is in no room of its own; this folder is in the room "%s" as "%s" through the Snapwork setup, which listens for it by itself. Tell the person this in one line.\n' \
           "$(space_of "$STATE")" "$(agent_of "$STATE")"
       else
         plog "status-none"
-        printf 'SnapWork: this chat is not in a room yet. Tell the person, in one line, to paste the invitation link on its own.\n'
+        printf 'Snapwork: this chat is not in a room yet. Tell the person, in one line, to paste the invitation link on its own.\n'
       fi
       exit 0 ;;
     sendcmd)
@@ -876,7 +876,7 @@ on_prompt() {
     exitcmd)
       if pick bound || try_adopt; then exit_space; fi
       plog "exit-none"
-      printf 'SnapWork: this chat is in no room, so there is nothing to stop. Tell the person this in one line.\n'
+      printf 'Snapwork: this chat is in no room, so there is nothing to stop. Tell the person this in one line.\n'
       exit 0 ;;
   esac
   if [ -n "$code" ]; then
@@ -885,7 +885,7 @@ on_prompt() {
     # A chat already in a room gets the old answer: its next step is /fork, which takes the link alone.
     if [ "$codes" = 1 ] && ! pick bound; then ask_to_join "$code"; fi
     plog "link-inside-text"
-    printf 'SnapWork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
+    printf 'Snapwork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
     exit 0
   fi
   if pick bound || try_adopt; then

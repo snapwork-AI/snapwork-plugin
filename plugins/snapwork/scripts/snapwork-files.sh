@@ -1,6 +1,6 @@
 #!/bin/sh
-# snapwork-files.sh: send and fetch SnapWork files with POSIX sh + curl only (M6.2).
-# snapwork-files-version: 5
+# snapwork-files.sh: send and fetch Snapwork files with POSIX sh + curl only (M6.2).
+# snapwork-files-version: 6
 #
 # snapwork-hook.sh hands its file commands to this script (it lives next to it, in ~/.snapwork),
 # after it has found the connection and checked the gateway, the key and, when the setup pinned it,
@@ -252,7 +252,7 @@ if [ "$MODE" = news ]; then
     if [ -n "$path" ] && [ "$(shown "$path" 400)" = "$path" ]; then
       again=" Send it again with: sh ~/.snapwork/snapwork-hook.sh --say --room $ROOM${AGENT:+ --agent $AGENT} --file '$path' -- '<note>'"
     fi
-    out="${out:+$out$NL}SnapWork: your file \"$name\" was not sent to the room: $(shown_text "${reason:-it failed}"). The room did not get it.$again"
+    out="${out:+$out$NL}Snapwork: your file \"$name\" was not sent to the room: $(shown_text "${reason:-it failed}"). The room did not get it.$again"
   done
   [ -n "$out" ] || exit 3
   json() { printf '%s' "$(json_text "$out")"; }
