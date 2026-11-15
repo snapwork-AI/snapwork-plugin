@@ -2,7 +2,7 @@
 # snapwork-plugin.sh: the SnapWork plugin's hooks (Claude Code, Claude Desktop's Code tab, and
 # Codex: the ChatGPT desktop app's Codex chats and the Codex CLI).
 #
-#   snapwork-plugin.sh prompt|stop|start|end [codex]     (reads the hook input JSON on stdin)
+#   snapwork-plugin.sh prompt|stop|start|end|progress [codex]     (reads the hook input JSON on stdin)
 #
 # "codex" (hooks/codex-hooks.json) changes how the agent answers and how Stop waits: see
 # snapwork-codex.sh. Without it, Claude.
@@ -24,6 +24,8 @@
 #   in no space and must not post as the original.
 # end (SessionEnd): tell the space this agent went away (after /clear: hand the space to the chat
 #   that starts next in this folder instead).
+# progress (PostToolUse on TaskCreate and TaskUpdate, Claude only): send the chat's to-do list to its
+#   space (snapwork-progress.sh); Stop marks it as not being worked on, SessionEnd closes it.
 # Joining, coming back, and a start in a space also turn on Claude's auto-update for the snapwork
 # marketplace, once per computer, and say so (snapwork-update.sh; never in Codex).
 #
@@ -225,7 +227,8 @@ detect_fork() {
     PARENTS="$PARENTS $other"
   done
 }
-detect_fork
+# A task change only needs this chat's own connection: it skips reading the transcript.
+[ "$EVENT" = progress ] || detect_fork
 # A copy made in the last few minutes (its SessionStart marker is fresh).
 fresh_fork() {
   [ -n "$MARKER" ] && [ -f "$MARKER" ] && [ -n "$(find "$MARKER" -mmin "-$FRESH_FORK_MINUTES" 2> /dev/null)" ]
@@ -929,6 +932,7 @@ on_stop() {
     [ "$APP" != codex ] || codex_post_reply
     # The app may stop a long Stop hook: the log says so (it then no longer listens for this chat).
     [ "$APP" != codex ] || trap 'plog "stop-ended-by-app"; exit 0' TERM HUP INT
+    progress_on_stop
     plog "listen"
     listen Stop
   fi
@@ -939,6 +943,7 @@ on_end() {
   # A question nobody answered goes with the chat (it holds a stranger's invitation code).
   if f=$(pending_join_file); then rm -f "$f"; fi
   pick bound || exit 0
+  progress_on_end
   if [ "$SRC" = clear ]; then
     # /clear: the chat goes on under a new session id; free the space for it (see on_start).
     set_session "$STATE" "" && plog "free-for-clear"
@@ -954,11 +959,13 @@ on_end() {
 . "$HERE/snapwork-update.sh" || exit 0
 . "$HERE/snapwork-connect.sh" || exit 0
 . "$HERE/snapwork-share.sh" || exit 0
+. "$HERE/snapwork-progress.sh" || exit 0
 
 case $EVENT in
   prompt) on_prompt ;;
   stop) on_stop ;;
   start) on_start ;;
   end) on_end ;;
+  progress) on_progress ;;
 esac
 exit 0

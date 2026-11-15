@@ -9,9 +9,9 @@
 
 API_STATUS=
 API_BODY=
-# api <GET|POST> <path under /rooms/<id>/> [body file]: one call with this chat's key (a POST sends
-# the body file, or {}). Sets API_STATUS (the HTTP status, or 000 when nothing came back) and
-# API_BODY (a private temp file with the answer).
+# api <GET|POST|PUT|DELETE> <path under /rooms/<id>/> [body file]: one call with this chat's key (a
+# POST or PUT sends the body file, or {}). Sets API_STATUS (the HTTP status, or 000 when nothing came
+# back) and API_BODY (a private temp file with the answer).
 api() {
   API_STATUS=000
   key=$(field key "$STATE")
@@ -22,16 +22,20 @@ api() {
   work_dir || { key=; return 0; }
   API_BODY=$WORK/api.body
   rm -f "$API_BODY"
-  if [ "$1" = POST ]; then
-    data='{}'
-    [ -z "${3:-}" ] || data=@$3
-    API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -q -K - --proto =https -sS --max-time "$API_SECONDS" \
-      -o "$API_BODY" -w '%{http_code}' -X POST -H 'content-type: application/json' --data-binary "$data" \
-      "$GATEWAY/rooms/$ROOM/$2" 2> /dev/null)
-  else
-    API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -q -K - --proto =https -sS --max-time "$API_SECONDS" \
-      -o "$API_BODY" -w '%{http_code}' "$GATEWAY/rooms/$ROOM/$2" 2> /dev/null)
-  fi
+  case $1 in
+    POST | PUT)
+      data='{}'
+      [ -z "${3:-}" ] || data=@$3
+      API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -q -K - --proto =https -sS --max-time "$API_SECONDS" \
+        -o "$API_BODY" -w '%{http_code}' -X "$1" -H 'content-type: application/json' --data-binary "$data" \
+        "$GATEWAY/rooms/$ROOM/$2" 2> /dev/null) ;;
+    DELETE)
+      API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -q -K - --proto =https -sS --max-time "$API_SECONDS" \
+        -o "$API_BODY" -w '%{http_code}' -X DELETE "$GATEWAY/rooms/$ROOM/$2" 2> /dev/null) ;;
+    *)
+      API_STATUS=$(printf 'header = "Authorization: Bearer %s"\n' "$key" | curl -q -K - --proto =https -sS --max-time "$API_SECONDS" \
+        -o "$API_BODY" -w '%{http_code}' "$GATEWAY/rooms/$ROOM/$2" 2> /dev/null) ;;
+  esac
   key=
   # curl prints the status even when it fails; anything else counts as no answer.
   case $API_STATUS in [0-9][0-9][0-9]) ;; *) API_STATUS=000 ;; esac

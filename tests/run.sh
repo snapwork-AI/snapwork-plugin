@@ -1454,6 +1454,160 @@ SNAPWORK_PERSON="Minh Vo" run prompt "$(prompt "$W4" "$(transcript "$W4")" "$HOM
 rm -f "$SW/computer.json"
 check "a connected computer joins as the app" 'joined_as "Claude"'
 
+echo "== 25. Claude's to-do list goes to the room (TaskCreate, TaskUpdate)"
+ROOM_P=25252525-0000-4000-8000-000000000025
+echo "kfr-pppp-0001|$ROOM_P|Progress room P" >> "$T/fake/spaces"
+mkdir -p "$HOMEDIR/projprog" "$HOMEDIR/projprog2"
+SP=25252525-aaaa-4000-8000-000000000001
+SPN=25252525-aaaa-4000-8000-000000000002
+TXP=$(transcript "$SP")
+TXPN=$(transcript "$SPN")
+posttool() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"%s","tool_input":{"taskId":"1","status":"completed"},"tool_response":{"success":true}}' "$1" "$2" "$3" "$4"; }
+# wait_calls <n> <call>: the sends run in the background, so wait (about 3 s at most) until the
+# call log holds <call> n times.
+wait_calls() {
+  i=0
+  while [ "$(grep -c -x -F -e "$2" "$T/fake/calls")" -lt "$1" ] && [ "$i" -lt 30 ]; do sleep 0.1; i=$((i + 1)); done
+}
+calls_of() { grep -c -x -F -e "$1" "$T/fake/calls"; }
+PBODY=$T/fake/progress_$ROOM_P
+# pcheck <name> <python expression about b, the last body sent>
+pcheck() {
+  if python3 -c 'import json,sys; b=json.load(open(sys.argv[1], encoding="utf-8")); sys.exit(0 if eval(sys.argv[2]) else 1)' "$PBODY" "$2" 2> /dev/null; then ok
+  else bad "$1" "$(cat "$PBODY" 2> /dev/null)"; fi
+}
+# task <id> <status> <subject as a JSON string's inside> [more JSON fields]: a file as Claude writes it.
+TASKS=$HOMEDIR/.claude/tasks/$SP
+mkdir -p "$TASKS"
+task() {
+  printf '{\n  "id": "%s",\n  "subject": "%s",\n  "description": "SECRET-DESC of task %s, \\"status\\": \\"completed\\"",\n  "status": "%s",\n  "blocks": [],\n  "blockedBy": []%s\n}\n' \
+    "$1" "$3" "$1" "$2" "${4:+,
+  $4}" > "$TASKS/$1.json"
+}
+run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "${LINK}kfr-pppp-0001")"
+ST_P=$(state_of "$ROOM_P")
+PMARK=${ST_P%.json}.progress
+check "the chat is in room P" '[ -n "$ST_P" ]'
+task 1 completed "Plan"
+task 2 in_progress "Deploy" '"activeForm": "Deploying"'
+task 3 pending "Review"
+reset_calls
+run stop "$(stop "$SP" "$TXP" "$HOMEDIR/projprog")"
+sleep 1
+not_called "Stop before any list sends no progress" "progress $ROOM_P"
+called "and still listens" "hook $ROOM_P"
+reset_calls
+: > "$T/fake/progress_slow"
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskUpdate)"
+not_called "the hook returns before the send is done (it runs in the background)" "progress $ROOM_P"
+rm -f "$T/fake/progress_slow"
+check "the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+empty_out "and says nothing in the chat"
+wait_calls 1 "progress $ROOM_P"
+called "a task change sends the list" "progress $ROOM_P"
+check "one send" '[ "$(calls_of "progress $ROOM_P")" = 1 ]'
+check "the body is valid JSON" 'python3 -c "import json,sys; json.load(open(sys.argv[1], encoding=\"utf-8\"))" "$PBODY"'
+pcheck "states and texts mapped, keys are the task ids" 'b["items"] == [{"text":"Plan","state":"done","key":"1"},{"text":"Deploying","state":"working","key":"2"},{"text":"Review","state":"todo","key":"3"}]'
+pcheck "list_id is the chat's session id" 'b["list_id"] == "25252525-aaaa-4000-8000-000000000001"'
+pcheck "working while the turn runs" 'b["working"] is True'
+pcheck "a time in milliseconds" 'isinstance(b["at"], int) and b["at"] > 10**12'
+pcheck "only the contract's fields" 'sorted(b) == ["at","items","list_id","working"]'
+check "no description is sent" '! grep -q "SECRET-DESC" "$PBODY"'
+not_called "the key is never on a command line" "KEY-IN-ARGV"
+check "the chat now has a list in the room" '[ -f "$PMARK" ] && grep -q "^$SP " "$PMARK"'
+unix && check "its marker is mode 600" '[ "$(ls -l "$PMARK" | cut -c 1-10)" = "-rw-------" ]'
+check "the log counts the items" 'grep -q "progress-work items=3" "$SW/plugin.log"'
+AT1=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["at"])' "$PBODY")
+
+cat > "$TASKS/3.json" << 'TASK'
+{
+  "id": "3",
+  "subject": "Review",
+  "description": "SECRET-DESC",
+  "status": "pending",
+  "metadata": {
+    "status": "completed",
+    "snapwork_blocked": "needs the owner\u2019s OK \"now\""
+  }
+}
+TASK
+cat > "$TASKS/4.json" << 'TASK'
+{
+  "id": "4",
+  "subject": "Fix \"quoted\" C:\\temp, café",
+  "description": "SECRET-DESC",
+  "status": "pending",
+  "metadata": {}
+}
+TASK
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskCreate)"
+wait_calls 2 "progress $ROOM_P"
+check "a second change sends again" '[ "$(calls_of "progress $ROOM_P")" = 2 ]'
+pcheck "metadata.snapwork_blocked makes the task blocked, with its reason" 'b["items"][2] == {"text":"Review","state":"blocked","reason":"needs the owner\u2019s OK \"now\"","key":"3"}'
+pcheck "only a blocked item has a reason" 'all(("reason" in i) == (i["state"] == "blocked") for i in b["items"])'
+pcheck "quotes, backslashes and UTF-8 in a subject arrive as written" 'b["items"][3]["text"] == "Fix \"quoted\" C:\\temp, caf\u00e9"'
+pcheck "a later send carries a later time" 'b["at"] > '"$AT1"
+check "no description is sent" '! grep -q "SECRET-DESC" "$PBODY"'
+
+for n in $(seq 5 51); do task "$n" pending "Task $n"; done
+: > "$TASKS/.lock"
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskCreate)"
+wait_calls 3 "progress $ROOM_P"
+pcheck "51 tasks: the first 50 are sent" 'len(b["items"]) == 50 and b["items"][-1]["key"] == "50"'
+pcheck "in the order of their ids" '[i["key"] for i in b["items"]][:12] == [str(k) for k in range(1, 13)]'
+for n in $(seq 5 51); do rm -f "$TASKS/$n.json"; done
+
+echo "== 25b. no list from a chat in no room, a turned-off chat, or Codex"
+mkdir -p "$HOMEDIR/.claude/tasks/$SPN"
+cp "$TASKS/1.json" "$HOMEDIR/.claude/tasks/$SPN/1.json"
+reset_calls
+run progress "$(posttool "$SPN" "$TXPN" "$HOMEDIR/projprog2" TaskCreate)"
+check "a chat in no room: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+run_cx progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskCreate)"
+check "Codex: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "/snapwork:exit-space")"
+has "the chat is turned off" "stopped listening in \"Progress room P\""
+reset_calls
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskUpdate)"
+check "a turned-off chat: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+sleep 1
+not_called "a chat in no room, a turned-off chat and Codex send nothing" "progress $ROOM_P"
+check "nothing at all is called" '[ ! -s "$T/fake/calls" ]'
+run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "/snapwork:join-space")"
+has "and on again" "listening again in \"Progress room P\""
+
+echo "== 25c. Stop marks the list as not being worked on; SessionEnd closes it"
+reset_calls
+run stop "$(stop "$SP" "$TXP" "$HOMEDIR/projprog")"
+wait_calls 1 "progress $ROOM_P"
+called "Stop sends the list again" "progress $ROOM_P"
+pcheck "as not working" 'b["working"] is False and len(b["items"]) == 4'
+called "and listens as before" "hook $ROOM_P"
+not_called "the key is never on a command line" "KEY-IN-ARGV"
+check "the marker records the Stop" '[ "$(cut -d " " -f 3 "$PMARK")" != 0 ]'
+reset_calls
+run end "$(end "$SP" "$TXP" "$HOMEDIR/projprog" other)"
+wait_calls 1 "progress-stop $ROOM_P"
+called "SessionEnd closes the list" "progress-stop $ROOM_P"
+called "and says away as before" "away $ROOM_P"
+check "the marker is gone" '[ ! -e "$PMARK" ]'
+not_called "the key is never on a command line" "KEY-IN-ARGV"
+check "the log names the close" 'grep -q "progress-end" "$SW/plugin.log"'
+reset_calls
+run stop "$(stop "$SP" "$TXP" "$HOMEDIR/projprog")"
+sleep 1
+not_called "after SessionEnd a Stop sends no list" "progress $ROOM_P"
+# /clear: the old session's list closes too; the chat goes on under a new id.
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskUpdate)"
+wait_calls 1 "progress $ROOM_P"
+reset_calls
+run end "$(end "$SP" "$TXP" "$HOMEDIR/projprog" clear)"
+wait_calls 1 "progress-stop $ROOM_P"
+called "/clear closes the old session's list" "progress-stop $ROOM_P"
+not_called "and sends no away" "away $ROOM_P"
+check "its marker is gone" '[ ! -e "$PMARK" ]'
+check "the log never holds a task's text" '! grep -q "SECRET-DESC\|Deploying\|Review\|quoted" "$SW/plugin.log"'
+
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'
 unix && check "log mode 600" '[ "$(ls -l "$SW/plugin.log" | cut -c 1-10)" = "-rw-------" ]'

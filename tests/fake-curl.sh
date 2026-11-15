@@ -18,6 +18,8 @@
 # A rename is logged as "rename <room>", its body kept in renamed_<room>; namefail_<room> answers 409.
 # A claim (7.6) is logged as "claim", its body appended to claim_bodies; claim_status forces a status.
 # A watcher's report is logged as "report <add> <body>" (adds) or "revival <id> <body>" (7.5).
+# Agent progress: a PUT is logged as "progress <room>" (its body kept in progress_<room>), a DELETE
+# as "progress-stop <room>"; progress_slow makes a PUT take 2 s before it is logged.
 set -u
 out=
 wfmt=
@@ -190,6 +192,18 @@ case $url in
     # Byte for byte (a command substitution would drop the last line break).
     if [ -f "$FAKE_DIR/work_lines" ]; then cp "$FAKE_DIR/work_lines" "$out"; else : > "$out"; fi
     code_status 200 ;;
+  */rooms/*/progress)
+    r=$(room_of)
+    if [ "$method" = DELETE ]; then
+      echo "progress-stop $r" >> "$FAKE_DIR/calls"
+    else
+      [ ! -e "$FAKE_DIR/progress_slow" ] || sleep 2
+      # Kept before the call is logged, so a test that sees the call reads its body.
+      case $data in @*) cp "${data#@}" "$FAKE_DIR/progress_$r.tmp" ;; *) printf '%s' "$data" > "$FAKE_DIR/progress_$r.tmp" ;; esac
+      mv -f "$FAKE_DIR/progress_$r.tmp" "$FAKE_DIR/progress_$r"
+      echo "progress $r" >> "$FAKE_DIR/calls"
+    fi
+    answer 200 '{"shown":true,"list_id":"x","state":"open"}' ;;
   *) exit 7 ;;
 esac
 exit 0
