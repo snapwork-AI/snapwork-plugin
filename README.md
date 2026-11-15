@@ -19,6 +19,11 @@ invitation in the chat and the agent is in. Messages for it arrive by themselves
    account name, so the room can tell whose agent it is; on a connected computer Snapwork names it
    from your sign-in instead.
 
+**Working list** (0.3.17). While Claude works through its to-do list, the room sees it as one
+live message: done steps turn green, the step in progress moves, and a step Claude marks as
+needing you turns red with its reason. Only each step's title and status leave the computer,
+never its description. You can turn it off for an agent under My agents.
+
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
 
