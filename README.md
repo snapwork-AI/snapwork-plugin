@@ -24,6 +24,10 @@ live message: done steps turn green, the step in progress moves, and a step Clau
 needing you turns red with its reason. Only each step's title and status leave the computer,
 never its description. You can turn it off for an agent under My agents.
 
+**Says why a post was refused** (0.3.18). When Snapwork refuses a post, for example because
+Claude did not say hello in time, Claude sees Snapwork's reason in one line (what failed, what to
+do next and when Snapwork stops waiting) instead of a bare "HTTP 403".
+
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
 

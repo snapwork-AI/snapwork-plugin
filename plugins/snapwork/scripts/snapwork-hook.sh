@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for Snapwork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 8
+# snapwork-hook-version: 9
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -95,7 +95,7 @@
 set -u
 
 # Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
-HOOK_VERSION=8
+HOOK_VERSION=9
 
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
@@ -671,7 +671,12 @@ post_json() {
     2[0-9][0-9]) if [ -n "${3:-}" ]; then "$3" "$work/resp"; else printf 'sent\n'; fi; exit 0 ;;
     0 | 000 | '') printf 'failed: could not reach the gateway\n'; exit 1 ;;
   esac
-  why=$(LC_ALL=C tr -d '\r\n' < "$work/resp" 2> /dev/null | LC_ALL=C sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | LC_ALL=C tr -cd 'A-Za-z0-9 _.,:-' | head -c 80)
+  # The reason: "error" as a string (older replies), else the error object's "message" (the
+  # gateway puts it last, one plain line: refusal_reason_in_one_line). Kept to safe characters.
+  flat=$(LC_ALL=C tr -d '\r\n' < "$work/resp" 2> /dev/null)
+  why=$(printf '%s' "$flat" | LC_ALL=C sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -n "$why" ] || why=$(printf '%s' "$flat" | LC_ALL=C sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  why=$(printf '%s' "$why" | LC_ALL=C tr -cd 'A-Za-z0-9 _.,:;()/?-' | head -c 400)
   printf 'failed: HTTP %s%s\n' "$code" "${why:+ ($why)}"
   exit 1
 }
