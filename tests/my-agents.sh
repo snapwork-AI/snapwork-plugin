@@ -485,7 +485,9 @@ RSTATE=$SW/rooms/$RSP.$RAG.json
 room_file "$RSTATE" "$RS" "$P1"
 revive_line() { printf 'revive\t%s\t%s\t%s\t%s\t%s\n' "$1" "${5:-claude-code}" "$2" "$3" "$4" > "$T/fake/work_lines"; }
 # The arguments claude got, after its folder and PATH.
-claude_args() { sed -n "${1:-1}p" "$T/fake/claude_calls" | sed 's/^cwd=[^ ]* path=[^ ]*//'; }
+# The arguments of call N: everything from the first " |" (a folder or PATH can hold spaces, as on
+# Windows, "/c/Program Files/..."; neither holds "|").
+claude_args() { sed -n "${1:-1}p" "$T/fake/claude_calls" | sed 's/^cwd=[^|]* |/ |/'; }
 nothing_ran() { check "$1: nothing started" '[ ! -f "$T/fake/claude_calls" ]'; }
 revival() { called "$1" "revival $RV {\"state\":\"failed\",\"failure\":\"$2\"}"; }
 
@@ -740,7 +742,7 @@ revival "no id printed" start_failed
 check "the watcher says it knows revivals on its poll" 'grep -q "^VERSION=0.3.13$" "$SW/snapwork-watch.sh"'
 
 echo "== 11i. a Codex chat comes back through Codex's own daemon (codex_comes_back_through_its_daemon)"
-codex_args() { sed -n "${1:-1}p" "$T/fake/codex_calls" | sed 's/^cwd=[^ ]* path=[^ ]*//'; }
+codex_args() { sed -n "${1:-1}p" "$T/fake/codex_calls" | sed 's/^cwd=[^|]* |/ |/'; }
 room_file "$RSTATE" "$RS" "$P1" codex
 cp "$T/bin/codex.fake" "$T/bin/codex"
 for bad in / "$HOMEDIR"; do
@@ -762,7 +764,7 @@ check "nothing the chat prints is kept on disk" '! grep -rq "session id:" "$SW" 
 check "no id from Snapwork and no label reach the command" '! grep -q -e "$RV" -e "$RSP" -e "$RAG" -e "Room R" "$T/fake/codex_calls"'
 called "reported started with the chat's id" "revival $RV {\"state\":\"started\",\"session_id\":\"$RS\"}"
 check "logged with short ids only" 'grep -q "started revive=e7e7e7e7 session=abcdef01" "$SW/watch.log" && ! grep -q "$RS" "$SW/watch.log"'
-check "the chat is still running when the watcher has reported (its listener waits)" 'ps -A -o args= | grep -v grep | grep -q "exec --skip-git-repo-check resume $RS"'
+unix && check "the chat is still running when the watcher has reported (its listener waits)" 'ps -A -o args= | grep -v grep | grep -q "exec --skip-git-repo-check resume $RS"'
 # The fake chat ends after 4 seconds; until then the watcher rightly calls it busy.
 sleep 4
 reset
