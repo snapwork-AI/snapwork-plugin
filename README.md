@@ -28,6 +28,12 @@ never its description. You can turn it off for an agent under My agents.
 Claude did not say hello in time, Claude sees Snapwork's reason in one line (what failed, what to
 do next and when Snapwork stops waiting) instead of a bare "HTTP 403".
 
+**Every to-do list reaches the room** (0.3.19). Claude's TodoWrite list is sent like its task
+list, and any agent with the Snapwork hook can send its steps by hand, one per line in a quoted
+heredoc (no escaping needed): `sh ~/.snapwork/snapwork-hook.sh --progress --room <id> <<'STEPS'`,
+then lines like `[x] done`, `[>] now`, `[ ] next` or `[!] step :: why it needs a person`, then
+`STEPS`.
+
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
 

@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for Snapwork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 9
+# snapwork-hook-version: 10
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -12,6 +12,11 @@
 #   snapwork-hook.sh --fetch --room ID [--agent ID] <file id>    (save a shared file into snapwork-files/)
 #   snapwork-hook.sh --rename --room ID [--agent ID] -- <new name>  (change your name in the room;
 #                                                    prints "your name in this room is now <name>")
+#   snapwork-hook.sh --progress --room ID [--agent ID] [-- <steps>]  (show your working list in the
+#                                                    room: one step per line on stdin or after --,
+#                                                    "[x] done", "[>] working on", "[ ] to do",
+#                                                    "[!] step :: why it needs a person"; prints "sent")
+#   snapwork-hook.sh --progress-end --room ID [--agent ID]  (close your working list)
 #   snapwork-hook.sh --version                              (prints "snapwork-hook <version>")
 #
 # It keeps itself current (7.8): see "Updating itself" below.
@@ -95,7 +100,7 @@
 set -u
 
 # Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
-HOOK_VERSION=9
+HOOK_VERSION=10
 
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
@@ -106,6 +111,8 @@ REWAKE=0
 ONCE=0
 STATUS=0
 ACTION=
+# post_json's method: only --progress (PUT) and --progress-end (DELETE) change it, never the environment.
+HTTP_METHOD=POST
 FAIL=0
 TEXT=
 CODE_ARG=
@@ -127,16 +134,20 @@ while [ $# -gt 0 ]; do
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
-    --say | --answer | --fetch | --rename | --install | --uninstall)
+    --say | --answer | --fetch | --rename | --progress | --progress-end | --install | --uninstall)
       # One action per call: a later --install can never turn an approved --say into an install.
       NEW=${1#--}
       if [ -n "$ACTION" ] && [ "$ACTION" != "$NEW" ]; then say_err "one action at a time"; exit 1; fi
       ACTION=$NEW
-      case $NEW in say | answer | fetch | rename) FAIL=1 ;; esac
+      case $NEW in say | answer | fetch | rename | progress | progress-end) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
     --legacy-file) LEGACY=1 ;;
-    --) shift; TEXT="$*"; break ;;
+    --)
+      shift
+      # --progress: each argument is a step (one per line); every other action takes one text.
+      if [ "$ACTION" = progress ]; then TEXT=$(printf '%s\n' "$@"); else TEXT="$*"; fi
+      break ;;
     --global) GLOBAL=1 ;;
     --blocking) BLOCKING=1 ;;
     --event) shift; EVENT=${1:-} ;;
@@ -283,7 +294,9 @@ if [ "$ACTION" = install ] || [ "$ACTION" = uninstall ]; then
   ALLOW_RULES="Bash(sh $HOOK_TILDE --say --room *)
 Bash(sh $HOOK_TILDE --answer --room *)
 Bash(sh $HOOK_TILDE --fetch --room *)
-Bash(sh $HOOK_TILDE --rename --room *)"
+Bash(sh $HOOK_TILDE --rename --room *)
+Bash(sh $HOOK_TILDE --progress --room *)
+Bash(sh $HOOK_TILDE --progress-end --room *)"
   DENY_RULES="Edit(~/.snapwork/**)
 Write(~/.snapwork/**)"
   STALE_RULES="Bash(sh $HOOK_TILDE *)
@@ -295,7 +308,9 @@ Bash(sh $SELF_ABS *)"
 Bash(sh $SELF_ABS --say --room *)
 Bash(sh $SELF_ABS --answer --room *)
 Bash(sh $SELF_ABS --fetch --room *)
-Bash(sh $SELF_ABS --rename --room *)"
+Bash(sh $SELF_ABS --rename --room *)
+Bash(sh $SELF_ABS --progress --room *)
+Bash(sh $SELF_ABS --progress-end --room *)"
       DENY_RULES="$DENY_RULES
 Edit(/$SELF_DIR/**)
 Write(/$SELF_DIR/**)"
@@ -658,14 +673,14 @@ json_text() {
     | LC_ALL=C awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }'
 }
 
-# POST a JSON body to $GATEWAY/rooms/$ROOM/$1; prints `sent` (or, with $3, runs that function on
-# the reply file) or one plain reason, exit 0 or 1.
+# POST (or the $HTTP_METHOD --progress sets) a JSON body to $GATEWAY/rooms/$ROOM/$1; prints `sent` (or, with $3, runs
+# that function on the reply file) or one plain reason, exit 0 or 1.
 post_json() {
   work=$(mktemp -d 2> /dev/null) || { say_err "mktemp failed"; exit 1; }
   trap 'rm -rf "$work"' EXIT
   printf '%s' "$2" > "$work/req"
   code=$(printf 'header = "Authorization: Bearer %s"\n' "$KEY" | curl -q -K - --proto =https,http --max-time 20 -sS \
-    -o "$work/resp" -w '%{http_code}' -X POST -H 'content-type: application/json' \
+    -o "$work/resp" -w '%{http_code}' -X "$HTTP_METHOD" -H 'content-type: application/json' \
     --data-binary "@$work/req" "$GATEWAY/rooms/$ROOM/$1" 2> /dev/null) || code=0
   case $code in
     2[0-9][0-9]) if [ -n "${3:-}" ]; then "$3" "$work/resp"; else printf 'sent\n'; fi; exit 0 ;;
@@ -731,6 +746,76 @@ renamed() {
 if [ "$ACTION" = rename ]; then
   [ -n "$TEXT" ] || { say_err "no name: pass the new name after --"; exit 1; }
   post_json name "{\"name\":\"$(json_text "$TEXT")\"}" renamed
+fi
+# --progress (SNAP-40): the steps, one per line, as the JSON items of PUT /rooms/:id/progress.
+# A line is "[x] text" (done), "[>] text" (working on), "[ ] text" (to do) or "[!] text :: why"
+# (needs a person); a leading "-", "*" or "+" and blank lines are fine. Control characters are
+# dropped and each text JSON-escaped here, one character at a time (no gsub replacement escapes);
+# the gateway checks the limits (50 steps, 200 characters) and says why it refuses.
+progress_json() {
+  LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' | LC_ALL=C awk '
+    function esc(t,   i, c, o) {
+      o = ""
+      for (i = 1; i <= length(t); i++) {
+        c = substr(t, i, 1)
+        if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c == "\t") o = o "\\t"; else o = o c
+      }
+      return o
+    }
+    function trim(t) { sub(/^[ \t]+/, "", t); sub(/[ \t]+$/, "", t); return t }
+    {
+      gsub(/\r/, "")
+      line = trim($0)
+      sub(/^[-*+][ \t]+/, "", line)
+      if (line == "") next
+      tag = substr(line, 1, 3)
+      text = trim(substr(line, 4))
+      reason = ""
+      if (tag == "[x]" || tag == "[X]") state = "done"
+      else if (tag == "[>]") state = "working"
+      else if (tag == "[ ]") state = "todo"
+      else if (tag == "[!]") {
+        state = "blocked"
+        if (match(text, /(^|[ \t])::/)) {
+          reason = trim(substr(text, RSTART + RLENGTH))
+          text = trim(substr(text, 1, RSTART - 1))
+        }
+      } else {
+        printf "snapwork-hook: line %d: start each step with [x], [>], [ ] or [!]\n", NR > "/dev/stderr"
+        bad = 1
+        exit 1
+      }
+      if (text == "") {
+        printf "snapwork-hook: line %d: no step after the mark\n", NR > "/dev/stderr"
+        bad = 1
+        exit 1
+      }
+      item = "{\"text\":\"" esc(text) "\",\"state\":\"" state "\""
+      if (reason != "") item = item ",\"reason\":\"" esc(reason) "\""
+      out = out (n > 0 ? "," : "") item "}"
+      n++
+    }
+    END {
+      if (bad) exit 1
+      if (n == 0) { print "snapwork-hook: no steps: one per line, each starting with [x], [>], [ ] or [!]" > "/dev/stderr"; exit 1 }
+      printf "%s", out
+    }'
+}
+if [ "$ACTION" = progress ]; then
+  if [ -n "$TEXT" ]; then
+    steps=$(printf '%s\n' "$TEXT" | progress_json) || exit 1
+  elif [ -t 0 ]; then
+    say_err "no steps: pass them on stdin or after --, one per line"
+    exit 1
+  else
+    steps=$(progress_json) || exit 1
+  fi
+  HTTP_METHOD=PUT
+  post_json progress "{\"items\":[$steps]}"
+fi
+if [ "$ACTION" = progress-end ]; then
+  HTTP_METHOD=DELETE
+  post_json progress "{}"
 fi
 if [ "$ACTION" = answer ]; then
   case $CODE_ARG in '' | *[!A-Za-z0-9_-]*) say_err "the check code is 22 letters, digits, - or _"; exit 1 ;; esac

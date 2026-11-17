@@ -101,6 +101,9 @@ run prompt "$(prompt "$S1" "$TX1" "$P1" "${LINK}kfr-aaaa-0001")"
 has "first join line" "you just joined the room \"spike-A, Mr. O'Neil (throwaway)\" as \"Claude\""
 has "the agent may pick a better name after its hello" "After your hello, if a name that says who you are or what you do here fits better than \"Claude\", change it once"
 has "and is told how" "Change your name in the room with: sh ~/.snapwork/snapwork-hook.sh --rename --room "
+has "and how to show its steps by hand (SNAP-40)" "sh ~/.snapwork/snapwork-hook.sh --progress --room "
+has "in a quoted heredoc, so no text needs escaping" "<<'STEPS', then one step per line ([x] a done step, [>] the step now, [ ] a next step"
+lacks "never as a printf pipe" "printf '%s"
 lacks "Claude has no Steer" "Steer"
 lacks "first join is not a copy" "copy"
 called "join call" "join kfr-aaaa-0001"
@@ -1607,6 +1610,56 @@ called "/clear closes the old session's list" "progress-stop $ROOM_P"
 not_called "and sends no away" "away $ROOM_P"
 check "its marker is gone" '[ ! -e "$PMARK" ]'
 check "the log never holds a task's text" '! grep -q "SECRET-DESC\|Deploying\|Review\|quoted" "$SW/plugin.log"'
+
+echo "== 25d. a chat with TodoWrite instead of the task tools sends that list (SNAP-40)"
+# todowrite <session> <transcript> <cwd> <todos JSON>: the hook input of a TodoWrite call; the
+# response repeats a different list, which must never be read.
+todowrite() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"TodoWrite","tool_input":{"todos":%s},"tool_response":{"oldTodos":[{"content":"SECRET-OLD","status":"pending","activeForm":"x"}],"newTodos":[{"content":"SECRET-OLD","status":"completed","activeForm":"x"}]}}' "$1" "$2" "$3" "$4"; }
+run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "${LINK}kfr-pppp-0001")"
+ST_P=$(state_of "$ROOM_P")
+PMARK=${ST_P%.json}.progress
+PTODOS=${ST_P%.json}.todos
+reset_calls
+run progress "$(todowrite "$SP" "$TXP" "$HOMEDIR/projprog" '[{"content":"Plan","status":"completed","activeForm":"Planning"},{"content":"Fix \"quoted\" C:\\temp, caf\u00e9","status":"in_progress","activeForm":"Fixing it"},{"content":"Ship","status":"pending","activeForm":"Shipping"},{"content":"Odd","status":"weird","activeForm":"x"}]')"
+check "the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
+empty_out "and says nothing in the chat"
+wait_calls 1 "progress $ROOM_P"
+called "a TodoWrite call sends the list" "progress $ROOM_P"
+pcheck "TodoWrite states mapped, activeForm while working, unknown states left out" 'b["items"] == [{"text":"Plan","state":"done","key":"t1"},{"text":"Fixing it","state":"working","key":"t2"},{"text":"Ship","state":"todo","key":"t3"}]'
+pcheck "working while the turn runs, in this chat's list" 'b["working"] is True and b["list_id"] == "25252525-aaaa-4000-8000-000000000001"'
+check "the response's copy is never read" '! grep -q "SECRET-OLD" "$PBODY"'
+check "the list is kept for Stop, mode 600" '[ -f "$PTODOS" ]'
+unix && check "its file is mode 600" '[ "$(ls -l "$PTODOS" | cut -c 1-10)" = "-rw-------" ]'
+run progress "$(todowrite "$SP" "$TXP" "$HOMEDIR/projprog" '[{"content":"Say \"hi\" to Đạt","status":"in_progress","activeForm":""}]')"
+wait_calls 2 "progress $ROOM_P"
+pcheck "an empty activeForm falls back to the step; quotes and UTF-8 arrive as written" 'b["items"] == [{"text":"Say \"hi\" to \u0110\u1ea1t","state":"working","key":"t1"}]'
+HUGE=$(head -c 5000 /dev/zero | tr '\0' 'a')
+run progress "$(todowrite "$SP" "$TXP" "$HOMEDIR/projprog" '[{"content":"'"$HUGE"'","status":"pending","activeForm":"x"},{"content":"Small","status":"in_progress","activeForm":""}]')"
+wait_calls 3 "progress $ROOM_P"
+pcheck "a step over 4 KB is left out, so the list still fits the gateway's body limit" 'b["items"] == [{"text":"Small","state":"working","key":"t1"}]'
+reset_calls
+run stop "$(stop "$SP" "$TXP" "$HOMEDIR/projprog")"
+wait_calls 1 "progress $ROOM_P"
+pcheck "Stop sends the TodoWrite list again, as not working" 'b["working"] is False and b["items"][0]["key"] == "t1"'
+reset_calls
+run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskUpdate)"
+wait_calls 1 "progress $ROOM_P"
+check "a task tool used after it takes over: the TodoWrite list is dropped" '[ ! -e "$PTODOS" ]'
+pcheck "and the task files are sent" 'b["items"][0]["key"] == "1"'
+run progress "$(todowrite "$SP" "$TXP" "$HOMEDIR/projprog" '[]')"
+wait_calls 1 "progress-stop $ROOM_P"
+called "an emptied TodoWrite list closes the room's list (no card left working)" "progress-stop $ROOM_P"
+check "and its marker is gone" '[ ! -e "$PMARK" ]'
+check "and is logged" 'grep -q "progress-cleared" "$SW/plugin.log"'
+run progress "$(todowrite "$SP" "$TXP" "$HOMEDIR/projprog" '[{"content":"Last","status":"completed","activeForm":"x"}]')"
+wait_calls 2 "progress $ROOM_P"
+reset_calls
+run end "$(end "$SP" "$TXP" "$HOMEDIR/projprog" other)"
+wait_calls 1 "progress-stop $ROOM_P"
+called "SessionEnd closes a TodoWrite list too" "progress-stop $ROOM_P"
+check "and its file is gone" '[ ! -e "$PTODOS" ]'
+check "the log never holds a TodoWrite step" '! grep -q "Fixing it\|Shipping\|SECRET-OLD" "$SW/plugin.log"'
+
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'

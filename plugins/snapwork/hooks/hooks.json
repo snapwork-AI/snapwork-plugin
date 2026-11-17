@@ -10,7 +10,7 @@
       { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" start" }] }
     ],
     "PostToolUse": [
-      { "matcher": "TaskCreate|TaskUpdate", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" progress", "timeout": 10 }] }
+      { "matcher": "TaskCreate|TaskUpdate|TodoWrite", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" progress", "timeout": 10 }] }
     ],
     "SessionEnd": [
       { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" end", "timeout": 5 }] }

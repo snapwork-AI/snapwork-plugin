@@ -2,6 +2,11 @@
 # the room: when a chat that is in a room changes its tasks (TaskCreate, TaskUpdate), the chat's
 # whole list goes to the room, which shows it as one live message.
 #
+# A chat whose Claude has TodoWrite instead of the task tools (SNAP-40) sends that list: PostToolUse
+# for TodoWrite carries the whole list in tool_input.todos; its items are kept in <connection>.todos
+# (mode 600) so Stop can send them again. The source used last wins: a TaskCreate or TaskUpdate
+# removes that file. Agents with neither tool use snapwork-hook.sh --progress (the listener).
+#
 # Claude keeps the list as one JSON file per task in ${CLAUDE_CONFIG_DIR:-~/.claude}/tasks/<chat>/,
 # already up to date when PostToolUse runs. Only the subject (the activeForm of a task being worked
 # on), the status and, for a blocked task, metadata.snapwork_blocked leave this computer; the
@@ -22,6 +27,9 @@
 # fixed GATEWAY only). The log gets the step and the number of items, never their text.
 
 PROGRESS_MAX_ITEMS=50
+# A TodoWrite step longer than this (bytes, as escaped JSON) is left out: the gateway shortens a
+# long step itself, but 50 huge ones would pass its 256 KiB body limit and the whole list would fail.
+PROGRESS_TODO_MAX_BYTES=4096
 # Task files read at most (a few may be left out: unknown status, no subject).
 PROGRESS_SCAN_FILES=200
 PROGRESS_FILE_MAX_BYTES=262144
@@ -29,6 +37,7 @@ PROGRESS_FILE_MAX_BYTES=262144
 PROGRESS_LOCK_TRIES=100
 PROGRESS_MARK=
 PROGRESS_LOCK=
+PROGRESS_TODOS=
 
 # The time in milliseconds (seconds times 1000 where date has no %N, as on macOS).
 progress_now_ms() {
@@ -139,9 +148,80 @@ substr($0, 1, 1) == sep { if (id != "") emit(); id = substr($0, 2); buf = ""; ne
 END { if (id != "") emit(); printf "%d\n", count > countfile }
 '
 
-# progress_items <count file>: this chat's items as JSON objects joined by commas (in the order of
-# the task ids); their number goes into the count file.
+# TodoWrite's list from the hook input: the objects of tool_input.todos only (tool_response repeats
+# them as oldTodos/newTodos and is never read). The same scanner rules as PROGRESS_AWK: each string is
+# copied as the JSON token it is; content is the step, activeForm the step while it is worked on.
+# shellcheck disable=SC2016
+PROGRESS_TODO_AWK='
+BEGIN { ctl = "[" sprintf("%c", 1) "-" sprintf("%c", 31) "]" }
+function usable(t,   s) {
+  if (t == "" || t ~ /^" *"$/ || t ~ ctl) return 0
+  s = t
+  gsub(/\\(["\\\/bfnrt]|u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f])/, "", s)
+  return index(s, "\\") == 0
+}
+function emit(   status, content, active, text, state) {
+  status = f["\"status\""]; content = f["\"content\""]; active = f["\"activeForm\""]
+  if (count >= max || !usable(content)) return
+  if (status == "\"completed\"") { state = "done"; text = content }
+  else if (status == "\"in_progress\"") { state = "working"; text = usable(active) ? active : content }
+  else if (status == "\"pending\"") { state = "todo"; text = content }
+  else return
+  if (length(text) > maxbytes) return
+  printf "%s{\"text\":%s,\"state\":\"%s\",\"key\":\"t%d\"}", (count > 0 ? "," : ""), text, state, count + 1
+  count++
+}
+{ buf = buf $0 "\n" }
+END {
+  n = length(buf); depth = 0; i = 1; intodo = 0
+  while (i <= n) {
+    c = substr(buf, i, 1)
+    if (c == "\"") {
+      j = i + 1
+      while (j <= n) {
+        d = substr(buf, j, 1)
+        if (d == "\\") { j += 2; continue }
+        if (d == "\"") break
+        j++
+      }
+      if (j > n) break
+      tok = substr(buf, i, j - i + 1)
+      i = j + 1
+      while (i <= n && index(" \t\r\n", substr(buf, i, 1)) > 0) i++
+      if (i <= n && substr(buf, i, 1) == ":") { lastkey[depth] = tok; i++; continue }
+      if (intodo && depth == 4) f[lastkey[4]] = tok
+      continue
+    }
+    if (c == "{" || c == "[") {
+      depth++; isobj[depth] = (c == "{"); lastkey[depth] = ""
+      if (depth == 4 && isobj[4] && !isobj[3] && isobj[2] && isobj[1] \
+        && lastkey[1] == "\"tool_input\"" && lastkey[2] == "\"todos\"") { intodo = 1; split("", f) }
+    } else if (c == "}" || c == "]") {
+      if (intodo && depth == 4) { emit(); intodo = 0 }
+      depth--
+      if (depth < 0) break
+    }
+    i++
+  }
+}
+'
+
+# progress_take_todos: keep this TodoWrite list for the sends (empty: the file goes).
+progress_take_todos() {
+  todos=$(printf '%s' "$INPUT" | LC_ALL=C awk -v max="$PROGRESS_MAX_ITEMS" -v maxbytes="$PROGRESS_TODO_MAX_BYTES" "$PROGRESS_TODO_AWK")
+  if [ -z "$todos" ]; then rm -f "$PROGRESS_TODOS"; return 1; fi
+  (umask 077 && printf '%s\n' "$todos" > "$PROGRESS_TODOS.$$" && mv -f "$PROGRESS_TODOS.$$" "$PROGRESS_TODOS") 2> /dev/null \
+    || { rm -f "$PROGRESS_TODOS.$$"; return 1; }
+}
+
+# progress_items <count file>: this chat's items as JSON objects joined by commas (its TodoWrite
+# list, else its task files in the order of their ids); their number goes into the count file.
 progress_items() {
+  if [ -f "$PROGRESS_TODOS" ] && [ ! -L "$PROGRESS_TODOS" ]; then
+    head -n 1 "$PROGRESS_TODOS" | tr -d '\n'
+    head -n 1 "$PROGRESS_TODOS" | grep -o '"state":"' | wc -l | tr -d ' ' > "$1"
+    return 0
+  fi
   pdir=${CLAUDE_CONFIG_DIR:-${HOME:-}/.claude}/tasks/$SID
   ids=$(for pf in "$pdir"/*.json; do
     pn=${pf##*/}
@@ -214,14 +294,31 @@ progress_start() {
 progress_paths() {
   PROGRESS_MARK=${STATE%.json}.progress
   PROGRESS_LOCK=$PROGRESS_MARK.lock
+  PROGRESS_TODOS=${STATE%.json}.todos
 }
 
-# PostToolUse (TaskCreate, TaskUpdate): send this chat's list, when the chat is in a room and on.
+# PostToolUse (TaskCreate, TaskUpdate, TodoWrite): send this chat's list, when the chat is in a room
+# and on. TodoWrite's list comes in the hook input; the task tools' lists are read from their files.
 on_progress() {
   { [ "$APP" = claude ] && [ -n "$SID" ]; } || exit 0
   pick bound || exit 0
   if is_off; then plog "progress-off"; exit 0; fi
   progress_paths
+  if [ "$(input_field tool_name)" = TodoWrite ]; then
+    if ! progress_take_todos; then
+      # An emptied list: close this chat's list in the room, so no card is left working.
+      if progress_read_mark && [ "$M_SID" = "$SID" ]; then
+        rm -f "$PROGRESS_MARK"
+        plog "progress-cleared"
+        progress_start end
+      else
+        plog "progress-skip"
+      fi
+      exit 0
+    fi
+  else
+    rm -f "$PROGRESS_TODOS"
+  fi
   progress_start work
   exit 0
 }
@@ -240,6 +337,6 @@ progress_on_end() {
   [ "$APP" = claude ] || return 0
   progress_paths
   { [ -f "$PROGRESS_MARK" ] && [ ! -L "$PROGRESS_MARK" ]; } || return 0
-  rm -f "$PROGRESS_MARK"
+  rm -f "$PROGRESS_MARK" "$PROGRESS_TODOS"
   progress_start end
 }
