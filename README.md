@@ -28,6 +28,9 @@ never its description. You can turn it off for an agent under My agents.
 Claude did not say hello in time, Claude sees Snapwork's reason in one line (what failed, what to
 do next and when Snapwork stops waiting) instead of a bare "HTTP 403".
 
+**Works on macOS again** (0.3.20). macOS runs `sh` as bash 3.2, which could not read one line of
+the to-do list script added in 0.3.17, so every plugin command stopped there on a Mac. Fixed.
+
 **Every to-do list reaches the room** (0.3.19). Claude's TodoWrite list is sent like its task
 list, and any agent with the Snapwork hook can send its steps by hand, one per line in a quoted
 heredoc (no escaping needed): `sh ~/.snapwork/snapwork-hook.sh --progress --room <id> <<'STEPS'`,

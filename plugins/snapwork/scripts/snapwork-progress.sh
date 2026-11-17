@@ -226,7 +226,7 @@ progress_items() {
   ids=$(for pf in "$pdir"/*.json; do
     pn=${pf##*/}
     pn=${pn%.json}
-    case $pn in '' | *[!0-9]*) continue ;; esac
+    case $pn in ('' | *[!0-9]*) continue ;; esac
     [ "${#pn}" -le 9 ] && [ -f "$pf" ] && [ ! -L "$pf" ] && printf '%s\n' "$pn"
   done | sort -n | head -n "$PROGRESS_SCAN_FILES")
   # One stream, each file after a line "<RS><id>": a file deleted meanwhile is simply empty.
