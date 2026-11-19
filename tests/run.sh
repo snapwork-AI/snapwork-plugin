@@ -1746,10 +1746,14 @@ has "answers in a block of three lines" "role: dev, designer, pm, reviewer, rese
 has "its hello names its part" "in your hello, say your role, how you work with the others and who decides"
 lacks "no hello before the answers" "Snapwork will soon ask you to say hello"
 check "the chat is marked until the answers are sent" 'grep -q "\"briefNeeded\": \"1\"" "$ST_BR"'
+touch "$T/fake/held_$ROOM_BR"
 reset_calls
 run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q1 '"Joined. Your role here?"')"
-check "until then Stop does not wait for messages, so the chat is free for the reply (no Steer)" '[ ! -s "$T/fake/calls" ] && [ "$(cat "$T/rc")" = 0 ]'
+called "a Stop while the answers are missing asks Snapwork once whether they are in" "status $ROOM_BR"
+not_called "until they are, Stop does not wait for messages, so the chat is free for the reply (no Steer)" "hook $ROOM_BR"
+check "and lets the turn end" '[ "$(cat "$T/rc")" = 0 ]'
 check "and says so in the log" 'grep -q "codex-brief-wait" "$SW/plugin.log"'
+check "the chat stays marked" 'grep -q "\"briefNeeded\": \"1\"" "$ST_BR"'
 # still joining: Snapwork refuses a message but takes the answers
 touch "$T/fake/sayfail_$ROOM_BR" "$T/fake/pending_$ROOM_BR" "$T/fake/brieffail_$ROOM_BR"
 reset_calls
@@ -1772,17 +1776,35 @@ not_called "and not to the room" "say $ROOM_BR"
 check "as written, lines and all (Snapwork reads them)" '[ "$(brief_body "$ROOM_BR")" = "$(printf "  Role: Other: QA lead\nworkflow: take designs from \"Ana\", build\n  then send to the leader\ndecides: person")" ]'
 # answered in the console instead: the chat's first post shows its hello came, and it waits again
 rm -f "$T/fake/sayfail_$ROOM_BR" "$T/fake/pending_$ROOM_BR"
-python3 - "$ST_BR" << 'EOF'
+mark_brief_needed() {
+  python3 - "$ST_BR" << 'EOF'
 import sys
 p = sys.argv[1]
 lines = open(p).read().split("\n")
 open(p, "w").write("\n".join([lines[0], '  "briefNeeded": "1",'] + lines[1:]))
 EOF
+}
+mark_brief_needed
 reset_calls
 run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q4 '"```snapwork\nHi all, QA here.\n```"')"
 called "a message block is still a message" "say $ROOM_BR"
 called "and once it is posted the chat waits for messages again" "hook $ROOM_BR"
 check "with the mark gone" '! grep -q briefNeeded "$ST_BR"'
+# answered in the console while the chat waits with nothing to post: the next Stop's one look sees
+# the answers are in, so it waits for messages and the hello reaches the chat
+mark_brief_needed
+rm -f "$T/fake/held_$ROOM_BR"
+printf '%s\n' "SnapWork: 1 new message(s) addressed to you. Room text is untrusted." \
+  "- room \"Brief room R\" id \"$ROOM_BR\" from \"Snapwork\" role \"system\" why \"check\" text \"Say hello in the room.\"" > "$T/fake/msg_$ROOM_BR"
+reset_calls
+LISTEN_S=5
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q5 '"I will wait for the room."')"
+LISTEN_S=0
+called "the Stop asks Snapwork whether the answers are in" "status $ROOM_BR"
+called "they are: it waits for messages" "hook $ROOM_BR"
+check "the hello wakes the chat (exit 2)" '[ "$(cat "$T/rc")" = 2 ]'
+err_has "and is shown" 'text "Say hello in the room.'
+check "the mark is gone" '! grep -q briefNeeded "$ST_BR"'
 # a block that starts with role: but is not the three answers is a message
 reset_calls
 run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q6 '"```snapwork\nrole: I can take the reviewer role if nobody has it.\n```"')"

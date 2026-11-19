@@ -21,7 +21,8 @@
 # Agent progress: a PUT is logged as "progress <room>" (its body kept in progress_<room>), a DELETE
 # as "progress-stop <room>"; progress_slow makes a PUT take 2 s before it is logged.
 # The person's three answers (M5.12): logged as "brief <room>", the body kept in brief_<room>;
-# brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them.
+# brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them;
+# held_<room> makes the status say the hello still waits for them (held_for_brief).
 set -u
 out=
 wfmt=
@@ -160,7 +161,9 @@ case $url in
     [ ! -e "$FAKE_DIR/pending_$r" ] || state=pending
     off=null
     [ ! -e "$FAKE_DIR/off_$r" ] || off=1792000000000
-    answer 200 "{\"listening\":{\"state\":\"$state\",\"tried\":[\"hook\"],\"left\":0,\"attempt\":null,\"notice\":null,\"off_at\":$off}}" ;;
+    held=false
+    [ ! -e "$FAKE_DIR/held_$r" ] || held=true
+    answer 200 "{\"listening\":{\"state\":\"$state\",\"tried\":[\"hook\"],\"left\":0,\"attempt\":null,\"notice\":null,\"off_at\":$off,\"held_for_brief\":$held}}" ;;
   */c/*/connect)
     # My agents: connect_status (a file) forces an answer; a Bearer key in curl's config reuses
     # the computer (no key back), unless key_refused exists (401).

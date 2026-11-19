@@ -209,6 +209,14 @@ codex_not_posted() {
 # The person's answers are in (or a post went through, so the hello came): Stop waits again.
 brief_done() { [ -z "$(field briefNeeded "$STATE")" ] || set_line "$STATE" briefNeeded "" || true; }
 
+# One quick look while the chat waits for the answers: its person may have given them in the room
+# instead. True only when Snapwork says the hello no longer waits for them.
+codex_brief_given() {
+  api GET listening
+  case $API_STATUS in 2??) ;; *) return 1 ;; esac
+  tr -d '\r\n' < "$API_BODY" 2> /dev/null | grep -q '"held_for_brief"[[:space:]]*:[[:space:]]*false'
+}
+
 # The block's lines ($1, still JSON-escaped) one per line: \n and \u000a end a line, the rest stays.
 codex_lines() {
   LC_ALL=C awk '

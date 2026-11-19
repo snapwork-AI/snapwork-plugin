@@ -959,7 +959,12 @@ on_stop() {
     [ "$APP" != codex ] || codex_post_reply
     # Codex's waiting keeps the chat busy, and Snapwork holds the hello until the person's answers
     # are in: until they are sent, nothing comes, so the chat stays free for the person's reply.
-    if [ "$APP" = codex ] && [ -n "$(field briefNeeded "$STATE")" ]; then plog "codex-brief-wait"; exit 0; fi
+    # Given in the room instead, they are in: the chat waits as usual, so the hello reaches it.
+    if [ "$APP" = codex ] && [ -n "$(field briefNeeded "$STATE")" ]; then
+      if ! codex_brief_given; then plog "codex-brief-wait"; exit 0; fi
+      brief_done
+      plog "codex-brief-given-in-room"
+    fi
     # The app may stop a long Stop hook: the log says so (it then no longer listens for this chat).
     [ "$APP" != codex ] || trap 'plog "stop-ended-by-app"; exit 0' TERM HUP INT
     progress_on_stop
