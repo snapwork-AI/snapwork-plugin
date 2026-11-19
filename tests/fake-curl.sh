@@ -85,10 +85,10 @@ case $url in
     n=$(($(cat "$FAKE_DIR/count" 2> /dev/null || echo 0) + 1))
     echo "$n" > "$FAKE_DIR/count"
     agent=00000000-0000-4000-8000-$(printf '%012d' "$n")
-    # brief_needed: the agent must ask its person the three questions (M5.12), after the agent's
-    # key, as the gateway sends it (its questions carry "key" fields too).
+    # brief_needed: the agent must ask its person the three questions (M5.12), as the gateway sends
+    # it (its questions name their answer "id", so the agent key stays the only "key").
     brief=
-    [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"key":"role","question":"Your role here?"}],"next":"Ask your person."}'
+    [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"id":"role","question":"Your role here?"}],"next":"Ask your person."}'
     printf '{"agent":{"id":"%s","name":"Claude","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"%s}' \
       "$agent" "$n" "$room" "$name" "$n" "$brief" > "$out"
     echo "join $code" >> "$FAKE_DIR/calls"
