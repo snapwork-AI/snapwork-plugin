@@ -1783,6 +1783,15 @@ run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q4 '"```snapwork\nHi all, QA h
 called "a message block is still a message" "say $ROOM_BR"
 called "and once it is posted the chat waits for messages again" "hook $ROOM_BR"
 check "with the mark gone" '! grep -q briefNeeded "$ST_BR"'
+# a block that starts with role: but is not the three answers is a message
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q6 '"```snapwork\nrole: I can take the reviewer role if nobody has it.\n```"')"
+called "is posted to the room" "say $ROOM_BR"
+not_called "and never taken as answers" "brief $ROOM_BR"
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q7 '"```snapwork\nrole: dev\nworkflow: build what the leader asks\n```"')"
+called "nor is one with only two of the three answers" "say $ROOM_BR"
+not_called "(no answers sent)" "brief $ROOM_BR"
 rm -f "$T/fake/brief_needed"
 
 echo "== 27. nothing the agent tells its person mentions listening, a hook or a listener"

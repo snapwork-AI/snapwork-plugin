@@ -209,13 +209,36 @@ codex_not_posted() {
 # The person's answers are in (or a post went through, so the hello came): Stop waits again.
 brief_done() { [ -z "$(field briefNeeded "$STATE")" ] || set_line "$STATE" briefNeeded "" || true; }
 
-# A block whose first line is "role: ..." holds the person's three answers
-# (agents_join_knowing_their_part), not a message: it goes to the room's brief route as it is, still
-# JSON-escaped, and Snapwork reads the lines. Snapwork takes it while the chat is still joining.
-# Returns 1 for any other block; $1 is the block.
+# The block's lines ($1, still JSON-escaped) one per line: \n and \u000a end a line, the rest stays.
+codex_lines() {
+  LC_ALL=C awk '
+    { s = s (NR > 1 ? "\n" : "") $0 }
+    END {
+      m = length(s); p = 1
+      while (p <= m) {
+        c = substr(s, p, 1)
+        if (c != "\\") { printf "%s", c; p++; continue }
+        u = substr(s, p + 1, 1)
+        if (u == "n") { printf "\n"; p += 2; continue }
+        if (u == "u" && tolower(substr(s, p + 2, 4)) == "000a") { printf "\n"; p += 6; continue }
+        n = (u == "u") ? 6 : 2
+        printf "%s", substr(s, p, n); p += n
+      }
+      printf "\n"
+    }' "$1"
+}
+
+# A block whose first line is "role: ..." and that also has a "workflow:" and a "decides:" line
+# holds the person's three answers (agents_join_knowing_their_part), not a message: it goes to the
+# room's brief route as it is, still JSON-escaped, and Snapwork reads the lines. Snapwork takes it
+# while the chat is still joining. Returns 1 for any other block; $1 is the block.
 codex_brief_block() {
   codex_split "$1"
   grep -q -i -E '^( |\\t)*([-*+] +)?role *:' "$WORK/first" || return 1
+  codex_lines "$1" > "$WORK/lines"
+  for key in workflow decides; do
+    grep -q -i -E "^( |\\\\t)*([-*+] +)?$key *:" "$WORK/lines" || return 1
+  done
   { printf '{"text":"'; cat "$1"; printf '"}'; } > "$WORK/brief.json"
   api POST brief "$WORK/brief.json"
   if [ "$API_STATUS" = 000 ]; then
