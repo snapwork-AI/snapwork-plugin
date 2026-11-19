@@ -21,8 +21,8 @@
 #                                                    the room's by name and id, as JSON)
 #   snapwork-hook.sh --skills get <skill id> --room ID [--agent ID]  (one skill's prompt, as JSON)
 #   snapwork-hook.sh --skills --room ID [--agent ID] create [--share] -- <name>  (prompt on stdin)
-#   snapwork-hook.sh --skills --room ID [--agent ID] edit <skill id> -- <new name>  (or, with no
-#                                                    name, the new prompt on stdin)
+#   snapwork-hook.sh --skills --room ID [--agent ID] edit <skill id> [-- <new name>]  (and/or the
+#                                                    new prompt on stdin)
 #   snapwork-hook.sh --skills --room ID [--agent ID] delete|share|unshare <skill id>
 #   snapwork-hook.sh --brief --room ID [--agent ID] [-- <lines>]  (send your person's three answers:
 #                                                    one per line on stdin or after --,
@@ -129,8 +129,10 @@ FAIL=0
 TEXT=
 CODE_ARG=
 FILE_ARG=
-# --skills: what to do (list, get, create, edit, delete, share, unshare) and whether create shares it.
+# --skills: what to do (list, get, create, edit, delete, share, unshare), how many words followed it
+# (the last one is CODE_ARG) and whether create shares it.
 SKILL_OP=
+SKILL_ARGS=0
 SKILL_SHARE=0
 GLOBAL=0
 LEGACY=0
@@ -157,7 +159,7 @@ while [ $# -gt 0 ]; do
       case $NEW in say | answer | fetch | rename | progress | progress-end | skills | brief) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
-    --share) SKILL_SHARE=1 ;;
+    --share) [ "$ACTION" = skills ] || { say_err "unknown argument"; exit "$FAIL"; }; SKILL_SHARE=1 ;;
     --legacy-file) LEGACY=1 ;;
     --)
       shift
@@ -171,8 +173,8 @@ while [ $# -gt 0 ]; do
     --agent) shift; AGENT=${1:-} ;;
     *)
       if [ "$ACTION" = skills ] && [ -z "$SKILL_OP" ]; then SKILL_OP=$1
-      elif [ "$ACTION" = skills ] && [ -n "$CODE_ARG" ]; then say_err "$SKILL_OP takes one skill id at most; a name goes after --"; exit 1
-      elif { [ "$ACTION" = answer ] || [ "$ACTION" = fetch ] || [ "$ACTION" = skills ]; } && [ -z "$CODE_ARG" ]; then CODE_ARG=$1
+      elif [ "$ACTION" = skills ]; then SKILL_ARGS=$((SKILL_ARGS + 1)); CODE_ARG=$1
+      elif { [ "$ACTION" = answer ] || [ "$ACTION" = fetch ]; } && [ -z "$CODE_ARG" ]; then CODE_ARG=$1
       else say_err "unknown argument"; exit "$FAIL"; fi
       ;;
   esac
@@ -861,44 +863,50 @@ skills_only() {
   say_err "$1 takes $2"
   exit 1
 }
+# skills_takes <ids> <name> <share> <what it takes>: the action's own arguments and nothing more,
+# then (for one id) a skill id that is only letters, digits and dashes.
+skills_takes() {
+  [ "$SKILL_ARGS" -le "$1" ] && { [ "$2" = 1 ] || [ -z "$TEXT" ]; } &&
+    { [ "$3" = 1 ] || [ "$SKILL_SHARE" = 0 ]; } || skills_only "${SKILL_OP:-list}" "$4"
+  [ "$1" = 0 ] && return 0
+  case $CODE_ARG in '' | *[!a-z0-9-]*) say_err "$SKILL_OP needs a skill id (from the list)"; exit 1 ;; esac
+}
 if [ "$ACTION" = skills ]; then
   [ -z "$FILE_ARG" ] || skills_only "${SKILL_OP:-list}" "no --file"
   case $SKILL_OP in
-    '' | list) [ -z "$CODE_ARG$TEXT" ] && [ "$SKILL_SHARE" = 0 ] || skills_only list "nothing more: no skill id, name or --share" ;;
-    create) [ -z "$CODE_ARG" ] || skills_only create "no skill id: the name goes after --" ;;
-    edit) [ "$SKILL_SHARE" = 0 ] || skills_only edit "no --share: share it with share <skill id>" ;;
-    get | delete | share | unshare) [ -z "$TEXT" ] && [ "$SKILL_SHARE" = 0 ] || skills_only "$SKILL_OP" "only a skill id" ;;
-    *) say_err "skills: list, get, create, edit, delete, share or unshare"; exit 1 ;;
-  esac
-  case $SKILL_OP in
-    get | edit | delete | share | unshare)
-      case $CODE_ARG in '' | *[!a-z0-9-]*) say_err "$SKILL_OP needs a skill id (from the list)"; exit 1 ;; esac
-      ;;
-  esac
-  case $SKILL_OP in
-    '' | list) HTTP_METHOD=GET; post_json skills "" skills_reply ;;
-    get) HTTP_METHOD=GET; post_json "skills/$CODE_ARG" "" skills_reply ;;
+    '' | list)
+      skills_takes 0 0 0 "nothing more: no skill id, name or --share"
+      HTTP_METHOD=GET; post_json skills "" skills_reply ;;
+    get)
+      skills_takes 1 0 0 "only a skill id"
+      HTTP_METHOD=GET; post_json "skills/$CODE_ARG" "" skills_reply ;;
     create)
+      skills_takes 0 1 1 "no skill id: the name goes after --"
       [ -n "$TEXT" ] || { say_err "no name: pass the skill's name after --"; exit 1; }
       prompt=$(skills_prompt)
       [ -n "$prompt" ] || { say_err "no prompt: pass it on stdin (a quoted heredoc)"; exit 1; }
       share=
       [ "$SKILL_SHARE" = 1 ] && share=',"share":true'
-      post_json skills "{\"name\":\"$(json_text "$TEXT")\",\"body\":\"$prompt\"$share}" skills_reply
-      ;;
+      post_json skills "{\"name\":\"$(json_text "$TEXT")\",\"body\":\"$prompt\"$share}" skills_reply ;;
     edit)
-      HTTP_METHOD=PATCH
-      # A new name after --; else the new prompt on stdin.
-      if [ -n "$TEXT" ]; then
-        post_json "skills/$CODE_ARG" "{\"name\":\"$(json_text "$TEXT")\"}" skills_reply
-      fi
+      skills_takes 1 1 0 "one skill id, a new name after -- and a new prompt on stdin (share it with share <skill id>)"
+      # A new name after --, a new prompt on stdin, or both: one change.
+      fields=
+      [ -z "$TEXT" ] || fields="\"name\":\"$(json_text "$TEXT")\""
       prompt=$(skills_prompt)
-      [ -n "$prompt" ] || { say_err "nothing to change: a new name after --, or the new prompt on stdin"; exit 1; }
-      post_json "skills/$CODE_ARG" "{\"body\":\"$prompt\"}" skills_reply
-      ;;
-    delete) HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG" "{}" skills_reply ;;
-    share) HTTP_METHOD=PUT; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
-    unshare) HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
+      [ -z "$prompt" ] || fields="$fields${fields:+,}\"body\":\"$prompt\""
+      [ -n "$fields" ] || { say_err "nothing to change: a new name after --, a new prompt on stdin, or both"; exit 1; }
+      HTTP_METHOD=PATCH; post_json "skills/$CODE_ARG" "{$fields}" skills_reply ;;
+    delete)
+      skills_takes 1 0 0 "only a skill id"
+      HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG" "{}" skills_reply ;;
+    share)
+      skills_takes 1 0 0 "only a skill id"
+      HTTP_METHOD=PUT; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
+    unshare)
+      skills_takes 1 0 0 "only a skill id"
+      HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
+    *) say_err "skills: list, get, create, edit, delete, share or unshare"; exit 1 ;;
   esac
 fi
 # --brief (agents_join_knowing_their_part): the person's three answers, one per line, sent as they
