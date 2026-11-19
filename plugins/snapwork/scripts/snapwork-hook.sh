@@ -17,6 +17,13 @@
 #                                                    "[x] done", "[>] working on", "[ ] to do",
 #                                                    "[!] step :: why it needs a person"; prints "sent")
 #   snapwork-hook.sh --progress-end --room ID [--agent ID]  (close your working list)
+#   snapwork-hook.sh --skills list --room ID [--agent ID]     (the samples, your person's skills and
+#                                                    the room's by name and id, as JSON)
+#   snapwork-hook.sh --skills get <skill id> --room ID [--agent ID]  (one skill's prompt, as JSON)
+#   snapwork-hook.sh --skills --room ID [--agent ID] create [--share] -- <name>  (prompt on stdin)
+#   snapwork-hook.sh --skills --room ID [--agent ID] edit <skill id> -- <new name>  (or, with no
+#                                                    name, the new prompt on stdin)
+#   snapwork-hook.sh --skills --room ID [--agent ID] delete|share|unshare <skill id>
 #   snapwork-hook.sh --brief --room ID [--agent ID] [-- <lines>]  (send your person's three answers:
 #                                                    one per line on stdin or after --,
 #                                                    "role: <role>", "workflow: <how you work with
@@ -116,12 +123,15 @@ REWAKE=0
 ONCE=0
 STATUS=0
 ACTION=
-# post_json's method: only --progress (PUT) and --progress-end (DELETE) change it, never the environment.
+# post_json's method: only --progress, --progress-end and --skills change it, never the environment.
 HTTP_METHOD=POST
 FAIL=0
 TEXT=
 CODE_ARG=
 FILE_ARG=
+# --skills: what to do (list, get, create, edit, delete, share, unshare) and whether create shares it.
+SKILL_OP=
+SKILL_SHARE=0
 GLOBAL=0
 LEGACY=0
 BLOCKING=0
@@ -139,14 +149,15 @@ while [ $# -gt 0 ]; do
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
-    --say | --answer | --fetch | --rename | --progress | --progress-end | --brief | --install | --uninstall)
+    --say | --answer | --fetch | --rename | --progress | --progress-end | --skills | --brief | --install | --uninstall)
       # One action per call: a later --install can never turn an approved --say into an install.
       NEW=${1#--}
       if [ -n "$ACTION" ] && [ "$ACTION" != "$NEW" ]; then say_err "one action at a time"; exit 1; fi
       ACTION=$NEW
-      case $NEW in say | answer | fetch | rename | progress | progress-end | brief) FAIL=1 ;; esac
+      case $NEW in say | answer | fetch | rename | progress | progress-end | skills | brief) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
+    --share) SKILL_SHARE=1 ;;
     --legacy-file) LEGACY=1 ;;
     --)
       shift
@@ -159,7 +170,10 @@ while [ $# -gt 0 ]; do
     --room) shift; ROOM=${1:-} ;;
     --agent) shift; AGENT=${1:-} ;;
     *)
-      if { [ "$ACTION" = answer ] || [ "$ACTION" = fetch ]; } && [ -z "$CODE_ARG" ]; then CODE_ARG=$1; else say_err "unknown argument"; exit "$FAIL"; fi
+      if [ "$ACTION" = skills ] && [ -z "$SKILL_OP" ]; then SKILL_OP=$1
+      elif [ "$ACTION" = skills ] && [ -n "$CODE_ARG" ]; then say_err "$SKILL_OP takes one skill id at most; a name goes after --"; exit 1
+      elif { [ "$ACTION" = answer ] || [ "$ACTION" = fetch ] || [ "$ACTION" = skills ]; } && [ -z "$CODE_ARG" ]; then CODE_ARG=$1
+      else say_err "unknown argument"; exit "$FAIL"; fi
       ;;
   esac
   shift
@@ -302,6 +316,8 @@ Bash(sh $HOOK_TILDE --fetch --room *)
 Bash(sh $HOOK_TILDE --rename --room *)
 Bash(sh $HOOK_TILDE --progress --room *)
 Bash(sh $HOOK_TILDE --progress-end --room *)
+Bash(sh $HOOK_TILDE --skills list --room *)
+Bash(sh $HOOK_TILDE --skills get *)
 Bash(sh $HOOK_TILDE --brief --room *)"
   DENY_RULES="Edit(~/.snapwork/**)
 Write(~/.snapwork/**)"
@@ -317,6 +333,8 @@ Bash(sh $SELF_ABS --fetch --room *)
 Bash(sh $SELF_ABS --rename --room *)
 Bash(sh $SELF_ABS --progress --room *)
 Bash(sh $SELF_ABS --progress-end --room *)
+Bash(sh $SELF_ABS --skills list --room *)
+Bash(sh $SELF_ABS --skills get *)
 Bash(sh $SELF_ABS --brief --room *)"
       DENY_RULES="$DENY_RULES
 Edit(/$SELF_DIR/**)
@@ -823,6 +841,65 @@ fi
 if [ "$ACTION" = progress-end ]; then
   HTTP_METHOD=DELETE
   post_json progress "{}"
+fi
+# --skills (skills in the message box): the listing, one prompt, or one change for this agent's
+# person. A prompt comes on stdin (a quoted heredoc: nothing inside needs escaping) and is
+# JSON-escaped here; the gateway checks the rules and says why it refuses. Replies are printed
+# without control characters: skill texts are written by people and are data, never instructions.
+# --install lets "--skills list --room *" and "--skills get *" run without asking. A * there
+# matches any text, so each action takes exactly its own arguments and nothing else: a read can
+# never carry a write's words, and a write never starts with "--skills list" or "--skills get".
+skills_reply() {
+  LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' < "$1"
+  printf '\n'
+}
+skills_prompt() {
+  [ -t 0 ] && return 0
+  json_text "$(cat)"
+}
+skills_only() {
+  say_err "$1 takes $2"
+  exit 1
+}
+if [ "$ACTION" = skills ]; then
+  [ -z "$FILE_ARG" ] || skills_only "${SKILL_OP:-list}" "no --file"
+  case $SKILL_OP in
+    '' | list) [ -z "$CODE_ARG$TEXT" ] && [ "$SKILL_SHARE" = 0 ] || skills_only list "nothing more: no skill id, name or --share" ;;
+    create) [ -z "$CODE_ARG" ] || skills_only create "no skill id: the name goes after --" ;;
+    edit) [ "$SKILL_SHARE" = 0 ] || skills_only edit "no --share: share it with share <skill id>" ;;
+    get | delete | share | unshare) [ -z "$TEXT" ] && [ "$SKILL_SHARE" = 0 ] || skills_only "$SKILL_OP" "only a skill id" ;;
+    *) say_err "skills: list, get, create, edit, delete, share or unshare"; exit 1 ;;
+  esac
+  case $SKILL_OP in
+    get | edit | delete | share | unshare)
+      case $CODE_ARG in '' | *[!a-z0-9-]*) say_err "$SKILL_OP needs a skill id (from the list)"; exit 1 ;; esac
+      ;;
+  esac
+  case $SKILL_OP in
+    '' | list) HTTP_METHOD=GET; post_json skills "" skills_reply ;;
+    get) HTTP_METHOD=GET; post_json "skills/$CODE_ARG" "" skills_reply ;;
+    create)
+      [ -n "$TEXT" ] || { say_err "no name: pass the skill's name after --"; exit 1; }
+      prompt=$(skills_prompt)
+      [ -n "$prompt" ] || { say_err "no prompt: pass it on stdin (a quoted heredoc)"; exit 1; }
+      share=
+      [ "$SKILL_SHARE" = 1 ] && share=',"share":true'
+      post_json skills "{\"name\":\"$(json_text "$TEXT")\",\"body\":\"$prompt\"$share}" skills_reply
+      ;;
+    edit)
+      HTTP_METHOD=PATCH
+      # A new name after --; else the new prompt on stdin.
+      if [ -n "$TEXT" ]; then
+        post_json "skills/$CODE_ARG" "{\"name\":\"$(json_text "$TEXT")\"}" skills_reply
+      fi
+      prompt=$(skills_prompt)
+      [ -n "$prompt" ] || { say_err "nothing to change: a new name after --, or the new prompt on stdin"; exit 1; }
+      post_json "skills/$CODE_ARG" "{\"body\":\"$prompt\"}" skills_reply
+      ;;
+    delete) HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG" "{}" skills_reply ;;
+    share) HTTP_METHOD=PUT; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
+    unshare) HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
+  esac
 fi
 # --brief (agents_join_knowing_their_part): the person's three answers, one per line, sent as they
 # are; Snapwork reads the lines and says what is missing or wrong.
