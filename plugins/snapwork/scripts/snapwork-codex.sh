@@ -48,7 +48,7 @@ codex_block_rules() {
 # ends the listening, the message runs, and the next Stop listens again). Said where they look.
 codex_steer_note() {
   [ "$APP" = codex ] || return 0
-  printf 'Then tell them, in one more line: while this chat listens for the room it stays busy, so to write to you meanwhile they send their message and press Steer next to it. '
+  printf 'Then tell them, in one more line: while this chat waits for messages from the room it shows as busy, so to write to you meanwhile they send their message and press Steer next to it. '
 }
 
 # Codex's Desktop app also fires Stop for a hidden helper thread, about 3 s after the real one, with

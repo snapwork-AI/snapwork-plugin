@@ -86,7 +86,7 @@ gone() {
   space=$(space_of "$STATE")
   case $1 in
     401) why="you were removed from \"$space\" (or its key no longer works)" ;;
-    403) why="Snapwork no longer lets this chat's member listen in \"$space\" (it was refused, for example because it did not say hello in time)" ;;
+    403) why="Snapwork refused this chat's member in \"$space\" (for example because it did not say hello in time)" ;;
     *) why="the room \"$space\" no longer exists" ;;
   esac
   stop_local_listener
@@ -95,7 +95,7 @@ gone() {
   [ ! -e "$aside" ] || aside=$aside.$$
   if (umask 077 && sed '/^[[:space:]]*"key"[[:space:]]*:/d' "$STATE" > "$aside"); then rm -f "$STATE"; else rm -f "$aside" "$STATE"; fi
   plog "gone-$1 room=$(printf '%s' "$ROOM" | cut -c 1-8)"
-  text="Snapwork: $why, so this chat stopped listening there. Paste a new invitation to join again. Tell the person this in one line; nothing else to do."
+  text="Snapwork: $why, so messages from there no longer reach this chat. Paste a new invitation to join again. Tell the person this in one line; nothing else to do."
   if [ "$EVENT" = stop ]; then
     printf '%s\n' "$text" >&2
     exit 2
@@ -113,7 +113,7 @@ exit_space() {
   space=$(space_of "$STATE")
   if is_off; then
     plog "exit-already-off"
-    printf 'Snapwork: this chat already stopped listening in "%s". You are still a member; '"$CMD_JOIN"' turns it back on. Tell the person this in one line.\n' "$space"
+    printf 'Snapwork: this chat is already turned off in "%s": messages for it wait in the room. You are still a member; '"$CMD_JOIN"' turns it back on. Tell the person this in one line.\n' "$space"
     exit 0
   fi
   api POST listening/stop
@@ -125,7 +125,7 @@ exit_space() {
     fi
     stop_local_listener
     plog "exit-off"
-    printf 'Snapwork: stopped listening in "%s". You are still a member; '"$CMD_JOIN"' turns it back on. Tell the person this in one line.\n' "$space"
+    printf 'Snapwork: turned this chat off in "%s": messages for it wait in the room. You are still a member; '"$CMD_JOIN"' turns it back on. Tell the person this in one line.\n' "$space"
     exit 0
   fi
   if key_unknown; then gone 401; fi
@@ -136,10 +136,10 @@ exit_space() {
     printf 'Snapwork: this chat is still being added to "%s" (Snapwork has not had its hello yet), so there is nothing to turn off yet. Nothing was changed. Tell the person this in one line.\n' "$space"
   elif route_missing; then
     plog "exit-not-available"
-    printf 'Snapwork: turning off is not available yet, so nothing was changed: this chat still listens in "%s". Tell the person this in one line.\n' "$space"
+    printf 'Snapwork: turning off is not available yet, so nothing was changed: this chat still gets messages from "%s". Tell the person this in one line.\n' "$space"
   else
     plog "exit-failed status=$API_STATUS"
-    printf 'Snapwork: could not reach Snapwork (answer %s), so nothing was changed: this chat still listens in "%s". Tell the person this in one line.\n' "$API_STATUS" "$space"
+    printf 'Snapwork: could not reach Snapwork (answer %s), so nothing was changed: this chat still gets messages from "%s". Tell the person this in one line.\n' "$API_STATUS" "$space"
   fi
   exit 0
 }
@@ -165,7 +165,7 @@ turn_on() {
       body_has '"waiting_more":true' && more=1
       set_line "$STATE" off "" || true
       plog "join-on"
-      printf 'Snapwork: listening again in "%s" as "%s"%s. Messages for you arrive by themselves after you end this turn. Tell the person this in one line. %sThen end your turn.\n' \
+      printf 'Snapwork: this chat is on again in "%s" as "%s"%s. Messages for you arrive by themselves after you end this turn. Tell the person this in one line. %sThen end your turn.\n' \
         "$space" "$name" "$(waiting_words "$waiting" "$more")" "$(codex_steer_note)"
       exit 0 ;;
   esac
@@ -178,14 +178,14 @@ turn_on() {
       # The gateway has no off switch: nothing there is off, so this chat simply listens again.
       set_line "$STATE" off "" || true
       plog "join-on-local"
-      printf 'Snapwork: listening again in "%s" as "%s". Messages for you arrive by themselves after you end this turn. Tell the person this in one line. %sThen end your turn.\n' "$space" "$name" "$(codex_steer_note)"
+      printf 'Snapwork: this chat is on again in "%s" as "%s". Messages for you arrive by themselves after you end this turn. Tell the person this in one line. %sThen end your turn.\n' "$space" "$name" "$(codex_steer_note)"
       exit 0 ;;
   esac
   unreachable_on
 }
 unreachable_on() {
   plog "join-on-failed status=$API_STATUS"
-  printf 'Snapwork: could not turn listening back on in "%s" (Snapwork answered %s). Nothing was changed. Tell the person this in one line.\n' "$space" "$API_STATUS"
+  printf 'Snapwork: could not turn this chat back on in "%s" (Snapwork answered %s). Nothing was changed. Tell the person this in one line.\n' "$space" "$API_STATUS"
   exit 0
 }
 
@@ -211,6 +211,6 @@ join_space_status() {
   if space_missing; then gone 404; fi
   if [ "$API_STATUS" = 403 ] && gate_refused; then gone 403; fi
   plog "status-in-space"
-  printf 'Snapwork: this chat is in the room "%s" as "%s" and listens; messages for you arrive by themselves after each turn. Tell the person this in one line.\n' "$space" "$name"
+  printf 'Snapwork: this chat is in the room "%s" as "%s", and messages for you arrive by themselves after each turn. Tell the person this in one line.\n' "$space" "$name"
   exit 0
 }

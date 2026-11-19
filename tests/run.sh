@@ -66,7 +66,10 @@ run() {
     DISABLE_AUTOUPDATER="${NO_AUTO:-}" CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= \
     SNAPWORK_LISTEN_SECONDS=${LISTEN_S:-0} SNAPWORK_BACKOFF_BASE_S=1 ${TEST_SH:-sh} "$PLUGIN" "$1" > "$T/out" 2> "$T/err"
   echo $? > "$T/rc"
+  said_by_plugin
 }
+# Everything a run told the chat, kept for the check that the person never hears about listening.
+said_by_plugin() { cat "$T/out" "$T/err" >> "$T/said_all" 2> /dev/null; }
 # A transcript; "fork <original>" makes it a copy's, "names <id>" puts an id in it.
 transcript() {
   f=$T/tx/$1.jsonl
@@ -237,7 +240,7 @@ touch "$T/fake/old"
 reset_calls
 run prompt "$(prompt "$S1" "$TX1" "$P1" "/snapwork:exit-space")"
 has "exit-space on a gateway without the route: not available" "turning off is not available yet"
-has "and names A" "still listens in \"spike-A, Mr. O'Neil (throwaway)\""
+has "and names A" "still gets messages from \"spike-A, Mr. O'Neil (throwaway)\""
 called "it asked the gateway" "stop $ROOM_A"
 check "nothing marked off" '! grep -q "\"off\"" "$ST_A"'
 rm -f "$T/fake/old"
@@ -365,7 +368,7 @@ run prompt "$(prompt "$S8" "$TX8" "$P1" "/snapwork:join-space")"
 has "and is in no room" "this chat is not in a room yet"
 touch "$T/fake/refused_$ROOM_D"
 run prompt "$(prompt "$S4" "$TX4" "$P1" "hi")"
-has "a refused member is told on the next message" "no longer lets this chat's member listen in \"Space D\""
+has "a refused member is told on the next message" "Snapwork refused this chat's member in \"Space D\""
 check "and set aside" '[ -z "$(state_of "$ROOM_D")" ]'
 LISTEN_S=0
 
@@ -374,7 +377,7 @@ LOCK_B=$SW/rooms/$(basename "$ST_B" .json).listener
 printf '99999 Mon Jan  1 00:00:00 2026\n' > "$LOCK_B"
 reset_calls
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:exit-space")"
-has "exit-space stops" "stopped listening in \"spike B (throwaway)\". You are still a member; /snapwork:join-space turns it back on."
+has "exit-space stops" "turned this chat off in \"spike B (throwaway)\": messages for it wait in the room. You are still a member; /snapwork:join-space turns it back on."
 called "stop call" "stop $ROOM_B"
 check "the connection is kept and marked off" 'grep -q "\"off\": \"1792000000000\"" "$ST_B" && grep -q "\"key\"" "$ST_B"'
 check "the running listener is told to leave" '[ "$(cat "$LOCK_B")" = "0 off" ]'
@@ -386,16 +389,16 @@ check "nor checks on a message" '[ ! -s "$T/fake/calls" ]'
 run start "$(start "$S2" "$TX2" "$P1" resume)"
 has "a new start says it is off" "turned off by its owner"
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:exit-space")"
-has "a second exit-space: already off" "already stopped listening in \"spike B (throwaway)\""
+has "a second exit-space: already off" "this chat is already turned off in \"spike B (throwaway)\""
 touch "$T/fake/proxy404"
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:join-space")"
-has "an HTML 404 in front of Snapwork changes nothing" "could not turn listening back on"
+has "an HTML 404 in front of Snapwork changes nothing" "could not turn this chat back on"
 check "still marked off and still saved" 'grep -q "\"off\"" "$ST_B"'
 rm -f "$T/fake/proxy404"
 echo 3 > "$T/fake/waiting"
 reset_calls
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:join-space")"
-has "join-space turns it back on" "listening again in \"spike B (throwaway)\" as \"Claude\"; 3 messages were waiting"
+has "join-space turns it back on" "this chat is on again in \"spike B (throwaway)\" as \"Claude\"; 3 messages were waiting"
 called "start call" "start $ROOM_B"
 check "no longer marked off" '! grep -q "\"off\"" "$ST_B"'
 reset_calls
@@ -404,9 +407,9 @@ called "listens again" "hook $ROOM_B"
 touch "$T/fake/off_$ROOM_B"
 echo 1 > "$T/fake/waiting"
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:join-space")"
-has "off at the gateway (email stop link): join-space turns it on" "listening again in \"spike B (throwaway)\" as \"Claude\"; 1 message was waiting"
+has "off at the gateway (email stop link): join-space turns it on" "this chat is on again in \"spike B (throwaway)\" as \"Claude\"; 1 message was waiting"
 run prompt "$(prompt "$S2" "$TX2" "$P1" "/snapwork:join-space")"
-has "listening: join-space says so" "as \"Claude\" and listens"
+has "listening: join-space says so" "as \"Claude\", and messages for you arrive by themselves"
 touch "$T/fake/pending_$ROOM_C"
 run prompt "$(prompt "$S3" "$TX3" "$P1" "/snapwork:exit-space")"
 has "pending: nothing to turn off yet" "nothing to turn off yet"
@@ -424,7 +427,7 @@ open(p, "w").write("\n".join([lines[0], '  "off": "1",'] + lines[1:]))
 EOF
 touch "$T/fake/old"
 run prompt "$(prompt "$S3" "$TX3" "$P1" "/snapwork:join-space")"
-has "listens again locally" "listening again in \"Space C\""
+has "listens again locally" "this chat is on again in \"Space C\""
 check "off cleared" '! grep -q "\"off\"" "$ST_C"'
 rm -f "$T/fake/old"
 check "keys never on a command line" '! grep -q KEY-IN-ARGV "$T/fake/calls"'
@@ -437,6 +440,7 @@ run_cx() {
     SNAPWORK_LISTEN_SECONDS=${LISTEN_S:-0} SNAPWORK_BACKOFF_BASE_S=1 SNAPWORK_CODEX_MAX_S=${CX_MAX:-82800} \
     SNAPWORK_CODEX_MIN_ROUND_S=${CX_MIN:-60} ${TEST_SH:-sh} "$PLUGIN" "$1" codex > "$T/out" 2> "$T/err"
   echo $? > "$T/rc"
+  said_by_plugin
 }
 cx_prompt() { printf '{"session_id":"%s","turn_id":"t-%s","transcript_path":"%s","cwd":"%s","hook_event_name":"UserPromptSubmit","model":"gpt","permission_mode":"default","prompt":"%s"}' "$1" "$1" "$2" "$3" "$4"; }
 cx_start() { printf '{"session_id":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart","model":"gpt","source":"%s"}' "$1" "$2" "$3" "$4"; }
@@ -579,16 +583,16 @@ check "and logged it" 'grep -q "codex-relisten" "$SW/plugin.log"'
 
 # skills arrive as text: $snapwork:join-space, @join-space, a [$...](...) link
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '$snapwork:join-space')"
-has "\$snapwork:join-space names the room" "this chat is in the room \"Codex space H\" as \"Claude\" and listens"
+has "\$snapwork:join-space names the room" "this chat is in the room \"Codex space H\" as \"Claude\", and messages for you arrive"
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '[$snapwork:join-space](/plugins/snapwork/codex-skills/join-space/SKILL.md)')"
-has "a skill link works too" "and listens"
+has "a skill link works too" ", and messages for you arrive"
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '$snapwork:source-command-join-space')"
-has "the skill Codex makes from the Claude command works too" "and listens"
+has "the skill Codex makes from the Claude command works too" ", and messages for you arrive"
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '$snapwork:join-spacefoo')"
-lacks "join-spacefoo is not the skill" "and listens"
+lacks "join-spacefoo is not the skill" ", and messages for you arrive"
 reset_calls
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '@exit-space')"
-has "@exit-space stops listening" "stopped listening in \"Codex space H\""
+has "@exit-space stops listening" "turned this chat off in \"Codex space H\""
 has "and names the Codex skill to turn it on" "\$snapwork:join-space turns it back on"
 called "stop call" "stop $ROOM_H"
 reset_calls
@@ -597,7 +601,7 @@ check "an off chat neither posts nor listens" '[ ! -s "$T/fake/calls" ] && [ "$(
 run_cx start "$(cx_start "$C1" "$CX1" "$P4" resume)"
 has "start says it is off, Codex skill named" "Only when the owner types \$snapwork:join-space"
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '$snapwork:join-space')"
-has "\$snapwork:join-space turns it on" "listening again in \"Codex space H\""
+has "\$snapwork:join-space turns it on" "this chat is on again in \"Codex space H\""
 has "and says to press Steer" "press Steer next to it. Then end your turn."
 run_cx start "$(cx_start "$C1" "$CX1" "$P4" resume)"
 has "start tells a Codex chat to answer with the block" 'starts with a line ```snapwork'
@@ -1569,7 +1573,7 @@ check "a chat in no room: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
 run_cx progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskCreate)"
 check "Codex: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
 run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "/snapwork:exit-space")"
-has "the chat is turned off" "stopped listening in \"Progress room P\""
+has "the chat is turned off" "turned this chat off in \"Progress room P\""
 reset_calls
 run progress "$(posttool "$SP" "$TXP" "$HOMEDIR/projprog" TaskUpdate)"
 check "a turned-off chat: the hook exits 0" '[ "$(cat "$T/rc")" = 0 ]'
@@ -1577,7 +1581,7 @@ sleep 1
 not_called "a chat in no room, a turned-off chat and Codex send nothing" "progress $ROOM_P"
 check "nothing at all is called" '[ ! -s "$T/fake/calls" ]'
 run prompt "$(prompt "$SP" "$TXP" "$HOMEDIR/projprog" "/snapwork:join-space")"
-has "and on again" "listening again in \"Progress room P\""
+has "and on again" "this chat is on again in \"Progress room P\""
 
 echo "== 25c. Stop marks the list as not being worked on; SessionEnd closes it"
 reset_calls
@@ -1688,6 +1692,22 @@ brief_hook -- "role: boss" "workflow: build" "decides: leader"
 has "a refusal says what to fix" "failed: HTTP 400 (role must be one of dev, designer, pm, reviewer, researcher, other)"
 check "and fails" '[ "$(cat "$T/rc")" = 1 ]'
 rm -f "$T/fake/brieffail_$ROOM_K" "$SW/rooms/$ROOM_K.$AG_K.json"
+
+echo "== 27. nothing the agent tells its person mentions listening, a hook or a listener"
+# Owner 2026-11-19: people do not know what listening is. From every run above: what a line asks
+# the agent to pass on (all of it before "Tell the person this", "Tell them so" and the like) and
+# each sentence that tells them something. Instructions only for the agent (a command) may say it.
+LC_ALL=C awk '
+  !/[Tt]ell (the person|them)/ { next }
+  {
+    if (match($0, /[Tt]ell (the person|them) (exactly )?(this|so)/)) print substr($0, 1, RSTART - 1)
+    n = split($0, parts, /\. /)
+    for (i = 1; i <= n; i++) if (parts[i] ~ /[Tt]ell (the person|them)/) print parts[i]
+  }' "$T/said_all" > "$T/told"
+check "the check reads what the runs said" 'grep -q "Snapwork: you just joined the room" "$T/told" && grep -q "press Steer" "$T/told"'
+if grep -i -E 'listen|hook' "$T/told" > "$T/told_bad"; then
+  bad "no text for the person says listen, hook or listener" "$(sort -u "$T/told_bad")"
+else ok; fi
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'

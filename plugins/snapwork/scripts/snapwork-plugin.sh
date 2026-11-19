@@ -641,7 +641,7 @@ on_invite() {
     ROOM=$R AGENT=$A STATE=$f
     if made_by_setup "$f"; then
       plog "already-in-setup"
-      printf 'Snapwork: this folder is already in the room "%s" as "%s" through the Snapwork setup, which listens for it by itself. Tell the person this in one line.\n' \
+      printf 'Snapwork: this folder is already in the room "%s" as "%s" through the Snapwork setup, which brings it the room\047s messages by itself. Tell the person this in one line.\n' \
         "$(space_of "$f")" "$(agent_of "$f")"
       exit 0
     fi
@@ -868,7 +868,7 @@ on_prompt() {
         join_space_status
       elif pick setup; then
         plog "status-setup"
-        printf 'Snapwork: this chat is in no room of its own; this folder is in the room "%s" as "%s" through the Snapwork setup, which listens for it by itself. Tell the person this in one line.\n' \
+        printf 'Snapwork: this chat is in no room of its own; this folder is in the room "%s" as "%s" through the Snapwork setup, which brings it the room\047s messages by itself. Tell the person this in one line.\n' \
           "$(space_of "$STATE")" "$(agent_of "$STATE")"
       else
         plog "status-none"
