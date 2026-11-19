@@ -69,7 +69,7 @@ HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
 # names it to Snapwork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.20
+PLUGIN_VERSION=0.3.21
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
@@ -405,6 +405,23 @@ hello_text() {
   printf 'Snapwork will soon ask you to say hello: messages for you arrive by themselves after you end a turn, so end your turn now%s. ' "$([ "$APP" != codex ] || printf ', with no snapwork block yet')"
   reply_text
 }
+# The join reply's "brief_needed" (agents_join_knowing_their_part): Snapwork holds the hello until the
+# person's three answers are in, so the agent asks them (Snapwork's questions, word for word), sends
+# them, and its hello names its part. The question box takes 2-4 options and adds its own Other.
+brief_text() {
+  if [ "$APP" = codex ]; then codex_brief_text; return 0; fi
+  printf 'Then ask them three questions in one question box (AskUserQuestion, one call with all three; with no question box, ask the same three in plain text) and wait for their answers. Never invent or guess an answer, and say nothing about how Snapwork works behind the scenes. '
+  printf 'Question 1, header "Role": "Your role here?", options Dev, Designer, PM and Reviewer, each with a short description. '
+  printf 'Question 2, header "With others": "How should I work with the others?", options "Tasks from the leader" (description: take tasks from the room\047s leader and send it the results) and "Help whoever asks" (description: answer any member who asks and share the results in the room). '
+  printf 'Question 3, header "Decides": "Who decides?", options "The room\047s leader" and "Me (ask me first)". '
+  printf 'Add no Other option: the box has its own, for Researcher or any other role and for their own words. '
+  printf 'Then send their answers once with: sh ~/.snapwork/snapwork-hook.sh --brief %s <<\047BRIEF\047, then three lines, then a line BRIEF (the quoted BRIEF needs no escaping): ' "$(say_args)"
+  printf 'role: dev, designer, pm or reviewer for those picks; an Other answer that names one of those or researcher is that role, and any other words are role: other: <their words>. '
+  printf 'workflow: the description of the option they picked, or their own words as they wrote them. '
+  printf 'decides: leader for "The room\047s leader", person for "Me (ask me first)"; for their own words, the one they mean (ask again if it is unclear). '
+  printf 'It prints sent. If it prints failed, tell them in one line what it says and ask that question again. '
+  printf 'Then end your turn: Snapwork asks you to say hello within seconds, and messages for you arrive by themselves after you end a turn. In your hello, say your role, how you work with the others and who decides. '
+}
 joined_text() {
   if [ "$FORK" -eq 1 ]; then
     if [ -n "$ORIGIN_SPACE" ]; then
@@ -417,8 +434,9 @@ joined_text() {
     printf 'Snapwork: you just joined the room "%s" as "%s", from this folder, for this chat, because the person pasted its invitation. Tell them so in one line. ' "$1" "$2"
   fi
   codex_steer_note
+  [ "$BRIEF_NEEDED" -eq 0 ] || brief_text
   name_text "$2"
-  hello_text
+  if [ "$BRIEF_NEEDED" -eq 1 ]; then reply_text; else hello_text; fi
 }
 back_text() {
   printf 'Snapwork: this chat is back in the room "%s" as "%s", the same member as before%s. Tell the person so in one line. ' "$1" "$2" "$3"
@@ -463,6 +481,8 @@ fail() {
 }
 
 # ---- joining ----
+# 1 when the join reply says the person's three answers are still to come (brief_needed).
+BRIEF_NEEDED=0
 # The person this computer names (agent_names_say_whose): git's user.name, else the account's full
 # name. SNAPWORK_PERSON, when set (even empty), stands in for both (tests).
 person_name() {
@@ -567,6 +587,9 @@ join() {
   valid_room "$ROOM" || fail "the join reply was not understood"
   valid_agent "$AGENT" || fail "the join reply was not understood"
   case $key in '' | *[!A-Za-z0-9._~+/=-]*) fail "the join reply had no usable key" ;; esac
+  # Snapwork waits for the person's three answers before the hello (absent when they were given in
+  # the console). Its questions are not read: the agent is told them in brief_text.
+  ! grep -q '"brief_needed"' "$reply" || BRIEF_NEEDED=1
   STATE=$ROOMS/$ROOM.$AGENT.json
   {
     printf '{\n'
@@ -574,6 +597,9 @@ join() {
     printf '  "app": "%s",\n' "$APP"
     # A copy started by an add is already its person's agent: the connect sweep skips it (M7.6).
     [ "$FORK" -ne 1 ] || printf '  "copy": "1",\n'
+    # Codex's Stop keeps the chat busy while it waits for messages: it waits only once the answers
+    # are sent (codex_brief_block), so the person can reply to the questions.
+    { [ "$BRIEF_NEEDED" -eq 1 ] && [ "$APP" = codex ]; } && printf '  "briefNeeded": "1",\n'
     printf '  "setup": "%s",\n' "$SETUP_ID"
     printf '  "project": "%s",\n' "$CWD"
     printf '  "gateway": "%s",\n' "$GATEWAY"
@@ -595,7 +621,7 @@ join() {
   refresh_kit
   [ "$FORK" -eq 0 ] || origin_space
   if [ "$FORK" -eq 1 ]; then plog "join-copy room=$(printf '%s' "$ROOM" | cut -c 1-8) from=$(printf '%s' "$PARENT" | cut -c 1-8)"
-  else plog "join-first room=$(printf '%s' "$ROOM" | cut -c 1-8)"
+  else plog "join-first room=$(printf '%s' "$ROOM" | cut -c 1-8) brief=$BRIEF_NEEDED"
   fi
   # 7.6: on a connected computer the agent becomes its person's (a copy started by an add already is).
   [ "$FORK" -eq 1 ] || claim_state "$STATE"
@@ -931,6 +957,9 @@ on_stop() {
   if pick bound || try_adopt; then
     if is_off; then plog "off"; exit 0; fi
     [ "$APP" != codex ] || codex_post_reply
+    # Codex's waiting keeps the chat busy, and Snapwork holds the hello until the person's answers
+    # are in: until they are sent, nothing comes, so the chat stays free for the person's reply.
+    if [ "$APP" = codex ] && [ -n "$(field briefNeeded "$STATE")" ]; then plog "codex-brief-wait"; exit 0; fi
     # The app may stop a long Stop hook: the log says so (it then no longer listens for this chat).
     [ "$APP" != codex ] || trap 'plog "stop-ended-by-app"; exit 0' TERM HUP INT
     progress_on_stop

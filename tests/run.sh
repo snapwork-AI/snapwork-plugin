@@ -108,6 +108,7 @@ has "and how to show its steps by hand (SNAP-40)" "sh ~/.snapwork/snapwork-hook.
 has "in a quoted heredoc, so no text needs escaping" "<<'STEPS', then one step per line ([x] a done step, [>] the step now, [ ] a next step"
 lacks "never as a printf pipe" "printf '%s"
 lacks "Claude has no Steer" "Steer"
+lacks "a join reply without brief_needed asks the person nothing (answered in the console)" "Your role here?"
 lacks "first join is not a copy" "copy"
 called "join call" "join kfr-aaaa-0001"
 ST_A=$(state_of "$ROOM_A")
@@ -481,6 +482,8 @@ check "and names its folder" 'grep -q "\"folder\":\"proj4\"" "$T/fake/join_body"
 ST_H=$(state_of "$ROOM_H")
 check "H belongs to the Codex chat" '[ "$(session_in "$ST_H")" = "$C1" ]'
 check "the connection says Codex joined it" 'grep -q "\"app\": \"codex\"" "$ST_H"'
+lacks "Codex without brief_needed asks nothing" "Your role here?"
+check "and waits for messages as before" '! grep -q briefNeeded "$ST_H"'
 
 # the hidden helper thread (transcript_path null, another session id) does nothing at all
 reset_calls
@@ -1675,7 +1678,8 @@ brief_hook() {
     ${TEST_SH:-sh} "$SCRIPTS/snapwork-hook.sh" --brief --room "$ROOM_K" --agent "$AG_K" "$@" > "$T/out" 2> "$T/err"
   echo $? > "$T/rc"
 }
-brief_body() { python3 -c 'import json,sys; sys.stdout.buffer.write(json.load(open(sys.argv[1], encoding="utf-8"))["text"].encode())' "$T/fake/brief_$ROOM_K"; }
+# brief_body [room]: the answers as Snapwork got them.
+brief_body() { python3 -c 'import json,sys; sys.stdout.buffer.write(json.load(open(sys.argv[1], encoding="utf-8"))["text"].encode())' "$T/fake/brief_${1:-$ROOM_K}"; }
 reset_calls
 brief_hook << 'BRIEF'
 role: other: QA lead
@@ -1692,6 +1696,94 @@ brief_hook -- "role: boss" "workflow: build" "decides: leader"
 has "a refusal says what to fix" "failed: HTTP 400 (role must be one of dev, designer, pm, reviewer, researcher, other)"
 check "and fails" '[ "$(cat "$T/rc")" = 1 ]'
 rm -f "$T/fake/brieffail_$ROOM_K" "$SW/rooms/$ROOM_K.$AG_K.json"
+
+echo "== 28. joining asks the person three questions first (agents_join_knowing_their_part)"
+ROOM_BQ=28282828-0000-4000-8000-00000000001c
+ROOM_BR=29292929-0000-4000-8000-00000000001d
+cat >> "$T/fake/spaces" << EOF
+kfr-brfq-0001|$ROOM_BQ|Brief room Q
+kfr-brfr-0001|$ROOM_BR|Brief room R
+EOF
+PBQ=$HOMEDIR/projq
+PBR=$HOMEDIR/projr
+mkdir -p "$PBQ" "$PBR"
+SBQ=28282828-aaaa-4000-8000-00000000001c
+TXBQ=$(transcript "$SBQ")
+touch "$T/fake/brief_needed"
+reset_calls
+run prompt "$(prompt "$SBQ" "$TXBQ" "$PBQ" "${LINK}kfr-brfq-0001")"
+ST_BQ=$(state_of "$ROOM_BQ")
+AG_BQ=$(sed -n 's/^  "agentId": "\(.*\)",$/\1/p' "$ST_BQ")
+check "the key is the agent's, not a question's" 'grep -q "\"key\": \"testkey" "$ST_BQ"'
+has "Claude says it joined" "you just joined the room \"Brief room Q\""
+has "then asks in one question box" "ask them three questions in one question box (AskUserQuestion"
+has "question 1, word for word" "\"Your role here?\", options Dev, Designer, PM and Reviewer"
+has "question 2, word for word" "\"How should I work with the others?\", options"
+has "question 3, word for word" "\"Who decides?\", options \"The room's leader\" and \"Me (ask me first)\""
+has "Researcher and other words come through the box's own Other" "the box has its own, for Researcher or any other role"
+has "never invents them" "Never invent or guess an answer"
+has "sends them with the listener, room and agent filled in" "sh ~/.snapwork/snapwork-hook.sh --brief --room $ROOM_BQ --agent $AG_BQ <<'BRIEF'"
+has "says how a pick becomes a line" "any other words are role: other: <their words>"
+has "its hello names its part" "In your hello, say your role, how you work with the others and who decides."
+lacks "no hello before the answers" "Snapwork will soon ask you to say hello"
+check "a Claude chat is not marked: its Stop never keeps the chat busy" '! grep -q briefNeeded "$ST_BQ"'
+reset_calls
+run stop "$(stop "$SBQ" "$TXBQ" "$PBQ")"
+called "so it waits for messages as before" "hook $ROOM_BQ"
+
+# Codex: the questions in plain text, the answers in a block that Snapwork keeps
+CBQ=01a171a2-56e9-7881-86fe-e9ca5071001d
+CXBQ=$T/tx/rollout-$CBQ.jsonl
+printf '{"type":"session_meta","payload":{"id":"%s","session_id":"%s","cwd":"%s"}}\n' "$CBQ" "$CBQ" "$PBR" > "$CXBQ"
+reset_calls
+run_cx prompt "$(cx_prompt "$CBQ" "$CXBQ" "$PBR" "${LINK}kfr-brfr-0001")"
+ST_BR=$(state_of "$ROOM_BR")
+has "Codex says it joined" "you just joined the room \"Brief room R\""
+has "and asks the three questions in plain text, word for word" "1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others? (for example: take designs from Barrett's Claude, build, send the result to the leader) 3. Who decides? (The room's leader, Me (ask me first))"
+has "never invents them" "Never invent or guess an answer"
+has "posts no block before they answer" "Post no snapwork block until they answer"
+has "answers in a block of three lines" "role: dev, designer, pm, reviewer, researcher, or other: <their few words>"
+has "its hello names its part" "in your hello, say your role, how you work with the others and who decides"
+lacks "no hello before the answers" "Snapwork will soon ask you to say hello"
+check "the chat is marked until the answers are sent" 'grep -q "\"briefNeeded\": \"1\"" "$ST_BR"'
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q1 '"Joined. Your role here?"')"
+check "until then Stop does not wait for messages, so the chat is free for the reply (no Steer)" '[ ! -s "$T/fake/calls" ] && [ "$(cat "$T/rc")" = 0 ]'
+check "and says so in the log" 'grep -q "codex-brief-wait" "$SW/plugin.log"'
+# still joining: Snapwork refuses a message but takes the answers
+touch "$T/fake/sayfail_$ROOM_BR" "$T/fake/pending_$ROOM_BR" "$T/fake/brieffail_$ROOM_BR"
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q2 '"Thanks.\n```snapwork\nrole: boss\nworkflow: build\ndecides: leader\n```"')"
+called "a block that starts with role: goes to the answers" "brief $ROOM_BR"
+not_called "never to the room as a message" "say $ROOM_BR"
+err_has "a refusal tells the chat what Snapwork said" "the answers to the three questions were not sent (role must be one of dev, designer, pm, reviewer, researcher, other)"
+check "and continues it" '[ "$(cat "$T/rc")" = 2 ]'
+not_called "without waiting for messages" "hook $ROOM_BR"
+rm -f "$T/fake/brieffail_$ROOM_BR"
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q2 '"Thanks.\n```snapwork\nrole: boss\nworkflow: build\ndecides: leader\n```"')"
+called "the same block after a failure is sent again" "brief $ROOM_BR"
+called "then the chat waits for Snapwork to ask for its hello" "hook $ROOM_BR"
+check "and is no longer marked" '! grep -q briefNeeded "$ST_BR"'
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q3 '"Changed.\n```snapwork\n  Role: Other: QA lead\nworkflow: take designs from \"Ana\", build\n  then send to the leader\ndecides: person\n```"')"
+called "a later block of answers (any case, indented) goes to the answers too" "brief $ROOM_BR"
+not_called "and not to the room" "say $ROOM_BR"
+check "as written, lines and all (Snapwork reads them)" '[ "$(brief_body "$ROOM_BR")" = "$(printf "  Role: Other: QA lead\nworkflow: take designs from \"Ana\", build\n  then send to the leader\ndecides: person")" ]'
+# answered in the console instead: the chat's first post shows its hello came, and it waits again
+rm -f "$T/fake/sayfail_$ROOM_BR" "$T/fake/pending_$ROOM_BR"
+python3 - "$ST_BR" << 'EOF'
+import sys
+p = sys.argv[1]
+lines = open(p).read().split("\n")
+open(p, "w").write("\n".join([lines[0], '  "briefNeeded": "1",'] + lines[1:]))
+EOF
+reset_calls
+run_cx stop "$(cx_stop "$CBQ" "$CXBQ" "$PBR" turn-q4 '"```snapwork\nHi all, QA here.\n```"')"
+called "a message block is still a message" "say $ROOM_BR"
+called "and once it is posted the chat waits for messages again" "hook $ROOM_BR"
+check "with the mark gone" '! grep -q briefNeeded "$ST_BR"'
+rm -f "$T/fake/brief_needed"
 
 echo "== 27. nothing the agent tells its person mentions listening, a hook or a listener"
 # Owner 2026-11-19: people do not know what listening is. From every run above: what a line asks

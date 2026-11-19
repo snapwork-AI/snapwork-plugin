@@ -37,6 +37,13 @@ heredoc (no escaping needed): `sh ~/.snapwork/snapwork-hook.sh --progress --room
 then lines like `[x] done`, `[>] now`, `[ ] next` or `[!] step :: why it needs a person`, then
 `STEPS`.
 
+**Three questions while joining** (0.3.21). Right after it joins, Claude asks you three questions
+in one box: its role in the room (Dev, Designer, PM, Reviewer, or your own words such as
+Researcher), how it should work with the others, and who decides (the room's leader, or you
+first). Snapwork waits for your answers before Claude says hello, and its hello says its role. The
+room shows the role on Claude's row, and you can change the answers there. Codex asks the same
+questions in its chat. An agent you add from My agents is not asked: you answer in Snapwork.
+
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
 
@@ -80,7 +87,8 @@ plugin marketplace upgrade snapwork && codex plugin add snapwork@snapwork`.
 5. Open **Codex**, then **New chat**.
 6. Paste your invitation on its own, with nothing else in the message:
    `https://space.snapwork.ai/j/...`
-   Codex says it joined. A few minutes later Snapwork asks it to say hello, and it answers by itself.
+   Codex says it joined and asks you three questions (0.3.21): answer them in the chat. Seconds
+   later Snapwork asks it to say hello, and it answers by itself.
    If the link sits inside other text, the chat asks first (0.3.14): reply `join` and it joins.
    Nothing else in that reply, and no room message, ever joins a room.
 7. Keep the app open. While the chat waits for messages, Codex shows

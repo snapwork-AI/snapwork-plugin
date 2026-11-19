@@ -21,7 +21,7 @@
 # Agent progress: a PUT is logged as "progress <room>" (its body kept in progress_<room>), a DELETE
 # as "progress-stop <room>"; progress_slow makes a PUT take 2 s before it is logged.
 # The person's three answers (M5.12): logged as "brief <room>", the body kept in brief_<room>;
-# brieffail_<room> answers 400 with what to fix.
+# brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them.
 set -u
 out=
 wfmt=
@@ -85,8 +85,12 @@ case $url in
     n=$(($(cat "$FAKE_DIR/count" 2> /dev/null || echo 0) + 1))
     echo "$n" > "$FAKE_DIR/count"
     agent=00000000-0000-4000-8000-$(printf '%012d' "$n")
-    printf '{"agent":{"id":"%s","name":"Claude","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"}' \
-      "$agent" "$n" "$room" "$name" "$n" > "$out"
+    # brief_needed: the agent must ask its person the three questions (M5.12), after the agent's
+    # key, as the gateway sends it (its questions carry "key" fields too).
+    brief=
+    [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"key":"role","question":"Your role here?"}],"next":"Ask your person."}'
+    printf '{"agent":{"id":"%s","name":"Claude","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"%s}' \
+      "$agent" "$n" "$room" "$name" "$n" "$brief" > "$out"
     echo "join $code" >> "$FAKE_DIR/calls"
     code_status 201 ;;
   */j/*)

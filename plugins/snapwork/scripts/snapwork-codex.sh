@@ -18,9 +18,13 @@
 # as data with awk: it stays JSON-escaped from Codex's input to the body sent to Snapwork, so no
 # part of it is ever decoded into a command line or run.
 #
+# A block whose first line is "role: ..." is the person's three answers to the questions asked at
+# the join, not a message: Snapwork keeps it and nothing is posted (codex_brief_block).
+#
 # Uses from snapwork-plugin.sh / snapwork-onoff.sh / snapwork-share.sh: INPUT, SID, SESSIONS,
-# STATE, ROOM, WORK, work_dir, input_field, valid_session, space_of, plog, api, API_STATUS,
-# key_unknown, space_missing, gone, codex_file_block.
+# STATE, ROOM, WORK, work_dir, input_field, valid_session, field, set_line, space_of, plog, api,
+# API_STATUS, api_reason, key_unknown, space_missing, gate_refused, gone, codex_split,
+# codex_file_block.
 
 CODEX_SAY_MAX_BYTES=60000
 CODEX_INPUT_MAX_BYTES=400000
@@ -49,6 +53,15 @@ codex_block_rules() {
 codex_steer_note() {
   [ "$APP" = codex ] || return 0
   printf 'Then tell them, in one more line: while this chat waits for messages from the room it shows as busy, so to write to you meanwhile they send their message and press Steer next to it. '
+}
+
+# The three questions at a join that needs them (brief_text): in plain text, answered in a block that
+# Snapwork keeps (codex_brief_block).
+codex_brief_text() {
+  printf 'Then ask them these three questions in plain text, word for word, and wait for their reply: 1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others? (for example: take designs from Barrett\047s Claude, build, send the result to the leader) 3. Who decides? (The room\047s leader, Me (ask me first)) '
+  printf 'Never invent or guess an answer, and say nothing about how Snapwork works behind the scenes. Post no snapwork block until they answer. '
+  printf 'When they have answered, end that answer with a snapwork block of exactly three lines, which Snapwork keeps as their answers and does not post in the room: role: dev, designer, pm, reviewer, researcher, or other: <their few words>; then workflow: <their words>; then decides: leader (the room\047s leader) or person (they want to be asked first). '
+  printf 'If Snapwork says the answers were not sent, ask again for what it names. Snapwork then asks you to say hello within seconds: in your hello, say your role, how you work with the others and who decides. '
 }
 
 # Codex's Desktop app also fires Stop for a hidden helper thread, about 3 s after the real one, with
@@ -193,6 +206,38 @@ codex_not_posted() {
   exit 2
 }
 
+# The person's answers are in (or a post went through, so the hello came): Stop waits again.
+brief_done() { [ -z "$(field briefNeeded "$STATE")" ] || set_line "$STATE" briefNeeded "" || true; }
+
+# A block whose first line is "role: ..." holds the person's three answers
+# (agents_join_knowing_their_part), not a message: it goes to the room's brief route as it is, still
+# JSON-escaped, and Snapwork reads the lines. Snapwork takes it while the chat is still joining.
+# Returns 1 for any other block; $1 is the block.
+codex_brief_block() {
+  codex_split "$1"
+  grep -q -i -E '^( |\\t)*([-*+] +)?role *:' "$WORK/first" || return 1
+  { printf '{"text":"'; cat "$1"; printf '"}'; } > "$WORK/brief.json"
+  api POST brief "$WORK/brief.json"
+  if [ "$API_STATUS" = 000 ]; then
+    sleep 2
+    api POST brief "$WORK/brief.json"
+  fi
+  case $API_STATUS in
+    2??) brief_done; plog "codex-brief-sent"; return 0 ;;
+  esac
+  key_unknown && gone 401
+  space_missing && gone 404
+  [ "$API_STATUS" = 403 ] && gate_refused && gone 403
+  plog "codex-brief-failed why=$API_STATUS"
+  why=$(api_reason)
+  [ "$API_STATUS" != 000 ] || why="Snapwork could not be reached"
+  # The corrected block may be the same text (after no answer): the next answer sends it again.
+  (umask 077 && [ ! -L "$said" ] && printf '%s\n' "$turn" > "$said") 2> /dev/null
+  printf 'Snapwork: the answers to the three questions were not sent (%s). Tell the person this in one line, ask again for what it names, and end that answer with the corrected block.\n' "${why:-Snapwork answered $API_STATUS}" >&2
+  codex_continued
+  exit 2
+}
+
 # Stop in Codex, in a chat that is in a space and listening: post the answer's snapwork block.
 codex_post_reply() {
   [ -n "$SID" ] || return 0
@@ -233,6 +278,7 @@ codex_post_reply() {
   codex_block_ok "$WORK/block" || codex_not_posted bad-text "the plugin could not read it"
   bytes=$(wc -c < "$WORK/block" | tr -d ' ')
   [ "$bytes" -le "$CODEX_SAY_MAX_BYTES" ] || codex_not_posted too-long "it is too long for one message: split it into shorter ones"
+  codex_brief_block "$WORK/block" && return 0
   # attach: and fetch: lines (snapwork-share.sh): the hook sends or saves the file for Codex.
   codex_file_block "$WORK/block" && return 0
   # The count first, so a long turn id can never cut it off.
@@ -245,7 +291,7 @@ codex_post_reply() {
     api POST say "$WORK/say.json"
   fi
   case $API_STATUS in
-    2??) plog "codex-said bytes=$bytes $tlog"; return 0 ;;
+    2??) brief_done; plog "codex-said bytes=$bytes $tlog"; return 0 ;;
   esac
   key_unknown && gone 401
   space_missing && gone 404

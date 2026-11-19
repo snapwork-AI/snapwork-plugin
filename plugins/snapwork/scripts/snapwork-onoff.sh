@@ -52,6 +52,15 @@ body_word() {
   [ -n "$API_BODY" ] || return 0
   tr -d '\r\n' < "$API_BODY" 2> /dev/null | grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[a-z_]*\"" | head -n 1 | sed 's/.*"\([a-z_]*\)"$/\1/'
 }
+# api_reason: Snapwork's reason in an error answer ("error" as a string, else the error's "message",
+# one plain line), kept to safe characters, or nothing.
+api_reason() {
+  [ -n "$API_BODY" ] || return 0
+  flat=$(LC_ALL=C tr -d '\r\n' < "$API_BODY" 2> /dev/null)
+  reason=$(printf '%s' "$flat" | LC_ALL=C sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ -n "$reason" ] || reason=$(printf '%s' "$flat" | LC_ALL=C sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  printf '%s' "$reason" | LC_ALL=C tr -cd 'A-Za-z0-9 _.,:;()/?-' | head -c 400
+}
 # A 404 from a gateway that does not have the route yet.
 route_missing() { [ "$API_STATUS" = 404 ] && body_has '"message":"Route not found"'; }
 # A 404 that is Snapwork saying the space is gone (anything else, say a proxy's page, is not).
