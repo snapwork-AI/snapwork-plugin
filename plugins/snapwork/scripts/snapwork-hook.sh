@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for Snapwork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 10
+# snapwork-hook-version: 11
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -17,6 +17,11 @@
 #                                                    "[x] done", "[>] working on", "[ ] to do",
 #                                                    "[!] step :: why it needs a person"; prints "sent")
 #   snapwork-hook.sh --progress-end --room ID [--agent ID]  (close your working list)
+#   snapwork-hook.sh --brief --room ID [--agent ID] [-- <lines>]  (send your person's three answers:
+#                                                    one per line on stdin or after --,
+#                                                    "role: <role>", "workflow: <how you work with
+#                                                    the others>", "decides: leader|person";
+#                                                    prints "sent")
 #   snapwork-hook.sh --version                              (prints "snapwork-hook <version>")
 #
 # It keeps itself current (7.8): see "Updating itself" below.
@@ -44,7 +49,7 @@
 # the user (in Claude Code: `! sh ~/.snapwork/snapwork-hook.sh --install --room <id>`), because
 # auto mode lets an agent not write its own settings. --uninstall removes that room's entry.
 # --install also adds narrow allow rules to "permissions.allow": Bash(sh ~/.snapwork/snapwork-hook.sh
-# --say --room *) and the same for --answer, --fetch and --rename (plus the absolute path written into the hook, unless the
+# --say --room *) and the same for --answer, --fetch, --rename, --progress and --brief (plus the absolute path written into the hook, unless the
 # script lives under the project folder), so replies run in Claude Code auto mode without a prompt.
 # It adds deny rules Edit(~/.snapwork/**) and Write(~/.snapwork/**) (and //<absolute dir>/**) so an
 # agent cannot rewrite the script it is allowed to run. The old broad `... snapwork-hook.sh *` rule
@@ -100,7 +105,7 @@
 set -u
 
 # Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
-HOOK_VERSION=10
+HOOK_VERSION=11
 
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
@@ -134,19 +139,19 @@ while [ $# -gt 0 ]; do
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
-    --say | --answer | --fetch | --rename | --progress | --progress-end | --install | --uninstall)
+    --say | --answer | --fetch | --rename | --progress | --progress-end | --brief | --install | --uninstall)
       # One action per call: a later --install can never turn an approved --say into an install.
       NEW=${1#--}
       if [ -n "$ACTION" ] && [ "$ACTION" != "$NEW" ]; then say_err "one action at a time"; exit 1; fi
       ACTION=$NEW
-      case $NEW in say | answer | fetch | rename | progress | progress-end) FAIL=1 ;; esac
+      case $NEW in say | answer | fetch | rename | progress | progress-end | brief) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
     --legacy-file) LEGACY=1 ;;
     --)
       shift
-      # --progress: each argument is a step (one per line); every other action takes one text.
-      if [ "$ACTION" = progress ]; then TEXT=$(printf '%s\n' "$@"); else TEXT="$*"; fi
+      # --progress and --brief: each argument is a line; every other action takes one text.
+      case $ACTION in progress | brief) TEXT=$(printf '%s\n' "$@") ;; *) TEXT="$*" ;; esac
       break ;;
     --global) GLOBAL=1 ;;
     --blocking) BLOCKING=1 ;;
@@ -296,7 +301,8 @@ Bash(sh $HOOK_TILDE --answer --room *)
 Bash(sh $HOOK_TILDE --fetch --room *)
 Bash(sh $HOOK_TILDE --rename --room *)
 Bash(sh $HOOK_TILDE --progress --room *)
-Bash(sh $HOOK_TILDE --progress-end --room *)"
+Bash(sh $HOOK_TILDE --progress-end --room *)
+Bash(sh $HOOK_TILDE --brief --room *)"
   DENY_RULES="Edit(~/.snapwork/**)
 Write(~/.snapwork/**)"
   STALE_RULES="Bash(sh $HOOK_TILDE *)
@@ -310,7 +316,8 @@ Bash(sh $SELF_ABS --answer --room *)
 Bash(sh $SELF_ABS --fetch --room *)
 Bash(sh $SELF_ABS --rename --room *)
 Bash(sh $SELF_ABS --progress --room *)
-Bash(sh $SELF_ABS --progress-end --room *)"
+Bash(sh $SELF_ABS --progress-end --room *)
+Bash(sh $SELF_ABS --brief --room *)"
       DENY_RULES="$DENY_RULES
 Edit(/$SELF_DIR/**)
 Write(/$SELF_DIR/**)"
@@ -816,6 +823,16 @@ fi
 if [ "$ACTION" = progress-end ]; then
   HTTP_METHOD=DELETE
   post_json progress "{}"
+fi
+# --brief (agents_join_knowing_their_part): the person's three answers, one per line, sent as they
+# are; Snapwork reads the lines and says what is missing or wrong.
+if [ "$ACTION" = brief ]; then
+  if [ -z "$TEXT" ]; then
+    if [ -t 0 ]; then say_err "no answers: pass the lines role:, workflow: and decides: on stdin or after --"; exit 1; fi
+    TEXT=$(LC_ALL=C head -c 8192)
+  fi
+  [ -n "$TEXT" ] || { say_err "no answers: pass the lines role:, workflow: and decides: on stdin or after --"; exit 1; }
+  post_json brief "{\"text\":\"$(json_text "$TEXT")\"}"
 fi
 if [ "$ACTION" = answer ]; then
   case $CODE_ARG in '' | *[!A-Za-z0-9_-]*) say_err "the check code is 22 letters, digits, - or _"; exit 1 ;; esac

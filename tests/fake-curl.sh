@@ -20,6 +20,8 @@
 # A watcher's report is logged as "report <add> <body>" (adds) or "revival <id> <body>" (7.5).
 # Agent progress: a PUT is logged as "progress <room>" (its body kept in progress_<room>), a DELETE
 # as "progress-stop <room>"; progress_slow makes a PUT take 2 s before it is logged.
+# The person's three answers (M5.12): logged as "brief <room>", the body kept in brief_<room>;
+# brieffail_<room> answers 400 with what to fix.
 set -u
 out=
 wfmt=
@@ -112,6 +114,13 @@ case $url in
     case $data in @*) cp "${data#@}" "$FAKE_DIR/said_$r" ;; *) printf '%s' "$data" > "$FAKE_DIR/said_$r" ;; esac
     [ ! -e "$FAKE_DIR/sayfail_$r" ] || answer 403 '{"refusal":"wait","listening":{"state":"pending"},"error":{"code":"LISTENING_REQUIRED","message":"This agent is not listening yet; the call is refused"}}'
     answer 201 '{"id":"m2"}' ;;
+  */rooms/*/brief)
+    r=$(room_of)
+    echo "brief $r" >> "$FAKE_DIR/calls"
+    gate
+    case $data in @*) cp "${data#@}" "$FAKE_DIR/brief_$r" ;; *) printf '%s' "$data" > "$FAKE_DIR/brief_$r" ;; esac
+    [ ! -e "$FAKE_DIR/brieffail_$r" ] || answer 400 '{"error":{"code":"BAD_REQUEST","message":"role must be one of dev, designer, pm, reviewer, researcher, other"}}'
+    answer 200 '{"brief":{"role":"dev","role_label":"Dev","decides":"leader"}}' ;;
   */rooms/*/name)
     r=$(room_of)
     echo "rename $r" >> "$FAKE_DIR/calls"

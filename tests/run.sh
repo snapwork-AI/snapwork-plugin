@@ -1660,6 +1660,34 @@ called "SessionEnd closes a TodoWrite list too" "progress-stop $ROOM_P"
 check "and its file is gone" '[ ! -e "$PTODOS" ]'
 check "the log never holds a TodoWrite step" '! grep -q "Fixing it\|Shipping\|SECRET-OLD" "$SW/plugin.log"'
 
+echo "== 26. the listener sends the person's three answers (--brief, listener 11)"
+ROOM_K=26262626-0000-4000-8000-00000000001a
+AG_K=00000000-0000-4000-8000-00000000001a
+printf '{\n  "project": "%s",\n  "gateway": "https://space.snapwork.ai",\n  "roomId": "%s",\n  "agentId": "%s",\n  "spaceName": "Brief room K",\n  "agentName": "Claude",\n  "key": "testkeyK"\n}\n' \
+  "$P1" "$ROOM_K" "$AG_K" > "$SW/rooms/$ROOM_K.$AG_K.json"
+# brief_hook [args...]: the listener as an agent runs it, stdin from the caller.
+brief_hook() {
+  env HOME="$HOMEDIR" SNAPWORK_HOME="$SW" PATH="$T/bin:$PATH" FAKE_DIR="$T/fake" \
+    ${TEST_SH:-sh} "$SCRIPTS/snapwork-hook.sh" --brief --room "$ROOM_K" --agent "$AG_K" "$@" > "$T/out" 2> "$T/err"
+  echo $? > "$T/rc"
+}
+brief_body() { python3 -c 'import json,sys; sys.stdout.buffer.write(json.load(open(sys.argv[1], encoding="utf-8"))["text"].encode())' "$T/fake/brief_$ROOM_K"; }
+reset_calls
+brief_hook << 'BRIEF'
+role: other: QA lead
+workflow: test what "Dev" builds, then tell the leader
+decides: person
+BRIEF
+has "the answers are sent" "sent"
+called "to the room's brief route" "brief $ROOM_K"
+check "as the three lines, quotes and all" '[ "$(brief_body)" = "$(printf "role: other: QA lead\nworkflow: test what \"Dev\" builds, then tell the leader\ndecides: person")" ]'
+brief_hook -- "role: dev" "workflow: build" "decides: leader"
+check "or one line per argument after --" '[ "$(brief_body)" = "$(printf "role: dev\nworkflow: build\ndecides: leader")" ]'
+touch "$T/fake/brieffail_$ROOM_K"
+brief_hook -- "role: boss" "workflow: build" "decides: leader"
+has "a refusal says what to fix" "failed: HTTP 400 (role must be one of dev, designer, pm, reviewer, researcher, other)"
+check "and fails" '[ "$(cat "$T/rc")" = 1 ]'
+rm -f "$T/fake/brieffail_$ROOM_K" "$SW/rooms/$ROOM_K.$AG_K.json"
 
 echo "== 14. the diagnostic log"
 check "log exists" '[ -f "$SW/plugin.log" ]'
