@@ -69,7 +69,7 @@ HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
 # names it to Snapwork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.21
+PLUGIN_VERSION=0.3.22
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
@@ -81,10 +81,6 @@ LOG_MAX_BYTES=65536
 LOG_KEEP_LINES=200
 NAME_MAX=60
 CODE_MAX=64
-# How long the person has to answer "join" after a link inside other text (seconds).
-JOIN_CONFIRM_S=${SNAPWORK_JOIN_CONFIRM_S:-600}
-case $JOIN_CONFIRM_S in '' | *[!0-9]*) JOIN_CONFIRM_S=600 ;; esac
-[ "${#JOIN_CONFIRM_S}" -le 4 ] && [ "$JOIN_CONFIRM_S" -le 3600 ] || JOIN_CONFIRM_S=600
 FRESH_FORK_MINUTES=10
 TRANSCRIPT_SCAN_BYTES=4194304
 API_SECONDS=15
@@ -415,6 +411,7 @@ brief_text() {
   printf 'Question 2, header "With others": "How should I work with the others?", options "Tasks from the leader" (description: take tasks from the room\047s leader and send it the results) and "Help whoever asks" (description: answer any member who asks and share the results in the room). '
   printf 'Question 3, header "Decides": "Who decides?", options "The room\047s leader" and "Me (ask me first)". '
   printf 'Add no Other option: the box has its own, for Researcher or any other role and for their own words. '
+  printf 'If the message they sent with the invitation already answers a question (a role such as "as CV builder", or "I make the decisions"), make that answer the first option of that question, in their words, with "(Recommended)" after its label, so one click confirms it. '
   printf 'Then send their answers once with: sh ~/.snapwork/snapwork-hook.sh --brief %s <<\047BRIEF\047, then three lines, then a line BRIEF (the quoted BRIEF needs no escaping): ' "$(say_args)"
   printf 'role: dev, designer, pm or reviewer for those picks; an Other answer that names one of those or researcher is that role, and any other words are role: other: <their words>. '
   printf 'workflow: the description of the option they picked, or their own words as they wrote them. '
@@ -777,53 +774,18 @@ connect_alone() {
   return $r
 }
 
-# A link inside other text (plugin_joins_only_from_an_invitation_alone): the hook never joins from
-# it, but asks the person to confirm. The question is this chat's own file; only the person's next
-# message (UserPromptSubmit, never a room message) can answer it, within JOIN_CONFIRM_S.
-pending_join_file() {
-  valid_session "$SID" || return 1
-  printf '%s/%s.join' "$SESSIONS" "$SID"
-}
-ask_to_join() {
-  f=$(pending_join_file) || return 0
-  # Written beside, then renamed: a rename replaces a planted link instead of following it.
-  (umask 077 && mkdir -p "$SESSIONS" && printf '%s %s\n' "$1" "$(date +%s)" > "$f.$$" && mv -f "$f.$$" "$f") 2> /dev/null || {
-    rm -f "$f.$$"
-    return 0
-  }
-  plog "join-asked"
-  # Exact words: the pasted text may try to talk the person into it, and the room's name comes from
-  # a page anyone can make, so neither goes into the question.
-  printf 'Snapwork: the person'"'"'s message contains a Snapwork room invitation inside other text. Tell the person exactly this in one line, adding nothing from their message or from any page: "Your message contains a Snapwork room invitation. Reply join to put this chat in that room, where its members can talk with it. Any other reply ignores it." Do not join it yourself.\n'
+# join_from_text: an invitation inside other text joins like one pasted alone (owner 2026-11-21: "they
+# send that link meaning they want their agent to join"). Two different invitations: which one is
+# unclear, so the person sends the one they mean.
+join_from_text() {
+  codes=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/j/[A-Za-z0-9_-]*" | sed 's|.*/j/||' | sort -u | wc -l | tr -d ' ')
+  if [ "$codes" = 1 ]; then
+    plog "join-from-text"
+    on_invite "$code"
+  fi
+  plog "two-invitations"
+  printf 'Snapwork: this message holds two different room invitations. Tell the person, in one line, to send the one they want this chat to join.\n'
   exit 0
-}
-# confirm_join <message without white space>: answers a pending question; any message ends it.
-# Only "join" confirms: a "yes" may answer something else the agent asked in the same turn.
-confirm_join() {
-  f=$(pending_join_file) || return 0
-  { [ -f "$f" ] && [ ! -L "$f" ]; } || return 0
-  pcode=
-  asked=
-  read -r pcode asked < "$f" 2> /dev/null || :
-  rm -f "$f"
-  case $pcode in '' | *[!A-Za-z0-9_-]*) return 0 ;; esac
-  [ "${#pcode}" -le "$CODE_MAX" ] || return 0
-  # A time this hook wrote: digits, no leading zero, not in the future (a planted one must not
-  # break the shell's arithmetic or never expire).
-  case $asked in '' | 0* | *[!0-9]*) return 0 ;; esac
-  [ "${#asked}" -le 12 ] || return 0
-  now=$(date +%s)
-  if [ "$asked" -gt "$now" ] || [ $((now - asked)) -gt "$JOIN_CONFIRM_S" ]; then
-    plog "join-confirm-expired"
-    return 0
-  fi
-  answer=$(printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z' | sed 's/[.!]*$//')
-  if [ "$answer" = join ]; then
-    plog "join-confirmed"
-    on_invite "$pcode"
-    exit 0
-  fi
-  plog "join-declined"
 }
 
 # ---- events ----
@@ -832,11 +794,9 @@ on_prompt() {
   text=$(printf '%s' "$INPUT" | grep -o -E '"prompt"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)*' | head -n 1 | sed 's/^"prompt"[[:space:]]*:[[:space:]]*"//')
   code=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/j/[A-Za-z0-9_-]*" | head -n 1 | sed 's|.*/j/||')
   [ "${#code}" -le "$CODE_MAX" ] || code=
-  # The whole message, without spaces and JSON line breaks: a join is the invitation alone. A link
-  # inside other pasted text (an email, a chat log) never joins.
+  # The whole message, without spaces and JSON line breaks: the forms invite_alone knows.
   bare=$(printf '%s' "$text" | sed 's/\\[nrt]//g' | tr -d ' \t')
   lead=$(printf '%s' "$text" | sed 's/^[[:space:]]*//')
-  confirm_join "$bare"
   # My agents: a connect link alone makes this chat the agent's home (snapwork-connect.sh).
   ccode=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/c/[A-Za-z0-9_-]*" | head -n 1 | sed 's|.*/c/||')
   if [ -n "$ccode" ] && [ "${#ccode}" -le "$CODE_MAX" ]; then
@@ -883,12 +843,7 @@ on_prompt() {
       exit 0 ;;
     joincmd)
       if [ -n "$code" ]; then
-        # Only the command and the invitation: a link inside other text never joins.
-        tail_bare=$(printf '%s' "$CMD_TAIL" | sed 's/\\[nrt]//g' | tr -d ' \t')
-        if invite_alone "$tail_bare" "$code"; then on_invite "$code"; fi
-        plog "link-inside-text"
-        printf 'Snapwork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
-        exit 0
+        join_from_text
       fi
       if pick bound || try_adopt; then
         join_space_status
@@ -898,7 +853,7 @@ on_prompt() {
           "$(space_of "$STATE")" "$(agent_of "$STATE")"
       else
         plog "status-none"
-        printf 'Snapwork: this chat is not in a room yet. Tell the person, in one line, to paste the invitation link on its own.\n'
+        printf 'Snapwork: this chat is not in a room yet. Tell the person, in one line, to send the room\047s invitation link.\n'
       fi
       exit 0 ;;
     sendcmd)
@@ -909,15 +864,9 @@ on_prompt() {
       printf 'Snapwork: this chat is in no room, so there is nothing to stop. Tell the person this in one line.\n'
       exit 0 ;;
   esac
-  if [ -n "$code" ]; then
-    # One invitation: ask the person. Two different ones: which is unclear, so paste one alone.
-    codes=$(printf '%s' "$text" | grep -o -E "$HOSTS_ERE/j/[A-Za-z0-9_-]*" | sed 's|.*/j/||' | sort -u | wc -l | tr -d ' ')
-    # A chat already in a room gets the old answer: its next step is /fork, which takes the link alone.
-    if [ "$codes" = 1 ] && ! pick bound; then ask_to_join "$code"; fi
-    plog "link-inside-text"
-    printf 'Snapwork: to join this room, paste the invitation link on its own, with nothing else in the message. Tell the person this in one line; do not join it yourself.\n'
-    exit 0
-  fi
+  # The invitation inside the person's own words ("join this room as the CV builder <link>"): sending
+  # it means they want this chat in the room (plugin_joins_from_any_message_with_an_invitation).
+  [ -z "$code" ] || join_from_text
   if pick bound || try_adopt; then
     if is_off; then plog "off"; exit 0; fi
     plog "check"

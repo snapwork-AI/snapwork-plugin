@@ -39,7 +39,7 @@ send_to_space() {
     fi
   elif ! pick setup; then
     plog "send-none"
-    printf 'Snapwork: this chat is not in a room yet, so nothing can be posted. Post nothing, and tell the person in one line to paste the invitation link on its own first.\n'
+    printf 'Snapwork: this chat is not in a room yet, so nothing can be posted. Post nothing, and tell the person in one line to send the room\047s invitation link first.\n'
     exit 0
   fi
   plog "send-asked"

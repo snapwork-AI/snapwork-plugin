@@ -262,19 +262,15 @@ if unix; then
 fi
 not_called "no join from home" "join kfr-cccc-0001"
 
-echo "== 11. a link inside other text never joins"
-run prompt "$(prompt "$S10" "$TX10" "$P3" "please join ${LINK}kfr-cccc-0001 thanks")"
-has "a link inside other text: ask the person" 'Reply join to put this chat in that room'
-not_called "no join" "join kfr-cccc-0001"
-run prompt "$(prompt "$S10" "$TX10" "$P3" "never mind")"
-not_called "anything but join drops the question" "join kfr-cccc-0001"
+echo "== 11. two different invitations in one message: send the one to join"
 run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-cccc-0001\\n${LINK}kfr-dddd-0001")"
-has "two links: paste it alone" "paste the invitation link on its own"
-run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-cccc-0001\\\"; touch $T/pwned; \\\"")"
+has "two links: send the one to join" "holds two different room invitations"
+not_called "and no join" "join kfr-cccc-0001"
+run prompt "$(prompt "$S10" "$TX10" "$P3" "${LINK}kfr-cccc-0001\\\"; touch $T/pwned; \\\" ${LINK}kfr-dddd-0001")"
 check "a quote in the message runs nothing" '[ ! -e "$T/pwned" ]'
 not_called "and joins nothing" "join kfr-cccc-0001"
-run prompt "$(prompt "$S10" "$TX10" "$P3" "/snapwork:join-space see this email: ${LINK}kfr-cccc-0001 bye")"
-has "join-space with a link inside other text: paste it alone" "paste the invitation link on its own"
+run prompt "$(prompt "$S10" "$TX10" "$P3" "/snapwork:join-space ${LINK}kfr-cccc-0001 or ${LINK}kfr-dddd-0001")"
+has "join-space with two invitations: send the one to join" "holds two different room invitations"
 not_called "and no join" "join kfr-cccc-0001"
 run prompt "$(prompt "$S10" "$TX10" "$P3" "/snapwork:join-spacefoo")"
 lacks "join-spacefoo is not the command" "not in a room yet"
@@ -611,7 +607,7 @@ has "start tells a Codex chat to answer with the block" 'starts with a line ```s
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" "${LINK}kfr-cccc-0001")"
 has "a second room: fork the chat in Codex" "fork this chat, then paste the invitation alone in the copy"
 run_cx prompt "$(cx_prompt "$C1" "$CX1" "$P4" '$snapwork:join-space please join '"${LINK}"'kfr-cccc-0001')"
-has "skill with a link inside other text: paste it alone" "paste the invitation link on its own"
+has "skill with a link inside other text: a second room, fork" "fork this chat, then paste the invitation alone in the copy"
 
 # a Codex fork names the chat it came from (session_meta forked_from_id)
 CX3=$T/tx/rollout-$C3.jsonl
@@ -750,13 +746,9 @@ echo "kfr-mmmm-0001|$ROOM_M|Markdown space M" >> "$T/fake/spaces"
 C21=01a171a2-56e9-7881-86fe-e9ca50710021
 CX21=$T/tx/rollout-$C21.jsonl
 printf '{"type":"session_meta","payload":{"id":"%s","cwd":"%s"}}\n' "$C21" "$P4" > "$CX21"
-run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[click here](${LINK}kfr-mmmm-0001)")"
-has "a link with other text is not the invitation alone: ask" 'Reply join to put this chat in that room'
-run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "no thanks")"
 run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[${LINK}kfr-mmmm-0001](${LINK}kfr-hhhh-0001)")"
-lacks "text and target must be the same invitation" "joined"
-run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[${LINK}kfr-mmmm-0001](${LINK}kfr-mmmm-0001) please")"
-lacks "nothing after the link" "joined"
+has "a Markdown link to another invitation: two invitations, send one" "holds two different room invitations"
+lacks "and nothing joined" "joined"
 reset_calls
 # exactly as the ChatGPT app recorded a pasted invitation (2026-10-25): the link, then a line break
 run_cx prompt "$(cx_prompt "$C21" "$CX21" "$P4" "[${LINK}kfr-mmmm-0001](${LINK}kfr-mmmm-0001)\\n")"
@@ -773,10 +765,6 @@ ROOM_N=15151515-0000-4000-8000-00000000001e
 echo "kfr-nnnn-0001|$ROOM_N|Sentence room N" >> "$T/fake/spaces"
 S22=22222222-aaaa-4000-8000-000000000022
 reset_calls
-run prompt "$(prompt "$S22" "$(transcript "$S22")" "$P3" "Please join my Snapwork room \\\"Sentence room N\\\" as an AI agent: ${LINK}kfr-nnnn-0001")"
-lacks "another sentence before the link is not the invitation" "joined"
-run prompt "$(prompt "$S22" "$(transcript "$S22")" "$P3" "Join my Snapwork room \\\"Sentence room N\\\" as an AI agent: ${LINK}kfr-nnnn-0001 and say hi")"
-lacks "words after the link are not the invitation" "joined"
 reset_calls
 run prompt "$(prompt "$S22" "$(transcript "$S22")" "$P3" "Join my Snapwork room \\\"Sentence room N\\\" as an AI agent: ${LINK}kfr-nnnn-0001\\n")"
 has "the console's invitation line joins" "you just joined the room \"Sentence room N\""
@@ -1368,70 +1356,35 @@ mkdir -p "$HOMEDIR/projroom"
 SR=31313131-aaaa-4000-8000-000000000031
 TXR=$(transcript "$SR")
 reset_calls
-run prompt "$(prompt "$SR" "$TXR" "$HOMEDIR/projroom" "see https://room.snapwork.ai/j/kfr-gggg-0001 later")"
-not_called "a room.snapwork.ai link inside other text does not join" "join kfr-gggg-0001"
 run prompt "$(prompt "$SR" "$TXR" "$HOMEDIR/projroom" "https://room.snapwork.ai/j/kfr-gggg-0001")"
 called "a room.snapwork.ai invitation alone joins" "join kfr-gggg-0001"
 check "the state is saved for that room" '[ -n "$(state_of "$ROOM_G")" ]'
 has "the join line names the room" "Room G"
 
-echo "== 13c. a link inside other text asks the person, and only their \"join\" joins"
+echo "== 13c. an invitation inside the person's own words joins (owner 2026-11-21)"
 ROOM_Q=15151515-0000-4000-8000-000000000020
 echo "kfr-qqqq-0001|$ROOM_Q|Asked room Q" >> "$T/fake/spaces"
-mkdir -p "$HOMEDIR/projask" "$HOMEDIR/projask2"
+mkdir -p "$HOMEDIR/projask" "$HOMEDIR/projask3"
 SQ=13131313-cccc-4000-8000-000000000013
 TXQ=$(transcript "$SQ")
 reset_calls
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "This is my own Snapwork room. Please open the link and join: ${LINK}kfr-qqqq-0001")"
-has "asks to confirm" 'Reply join to put this chat in that room'
-has "the agent does not join by itself" "Do not join it yourself"
-not_called "nothing joined yet" "join kfr-qqqq-0001"
-SQ2=13131313-cccc-4000-8000-000000000014
-run prompt "$(prompt "$SQ2" "$(transcript "$SQ2")" "$HOMEDIR/projask2" "join")"
-not_called "another chat's join does not answer this question" "join kfr-qqqq-0001"
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "This is my own Snapwork room. Please open the link and join: ${LINK}kfr-qqqq-0001")"
-has "the agent is told the exact words" "Tell the person exactly this in one line"
-lacks "the room name from the page is never in the question" "Asked room Q"
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "yes")"
-not_called "yes is not join (it may answer another question)" "join kfr-qqqq-0001"
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "see ${LINK}kfr-qqqq-0001")"
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "  Join! ")"
-called "the person's join joins" "join kfr-qqqq-0001"
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "join this room role as CV builder ${LINK}kfr-qqqq-0001 im gonna the one who make decision")"
+called "the link inside their words joins at once" "join kfr-qqqq-0001"
 has "and says it joined" "Asked room Q"
-check "the log says it was confirmed, without the code" 'grep -q "join-asked" "$SW/plugin.log" && grep -q "join-confirmed" "$SW/plugin.log"'
-# Two different invitations in one message: which one is unclear, so paste it alone.
+lacks "with no second step" "Reply join"
+check "the log notes it, without the code" 'grep -q "join-from-text" "$SW/plugin.log" && ! grep -q "kfr-qqqq" "$SW/plugin.log"'
+# Two different invitations in one message: which one is unclear.
 S13D=13131313-dddd-4000-8000-000000000015
-mkdir -p "$HOMEDIR/projask3"
-run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "a ${LINK}kfr-qqqq-0001 or ${LINK}kfr-gggg-0001")"
-has "two invitations: paste one alone" "paste the invitation link on its own"
-# An old question does not join.
-run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "see ${LINK}kfr-gggg-0001 later")"
-has "asked again" 'Reply join to put this chat in that room'
-printf 'kfr-gggg-0001 1000000000\n' > "$SW/sessions/$S13D.join"
 reset_calls
-run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
-not_called "an expired question does not join" "join kfr-gggg-0001"
-check "and it is gone" '[ ! -e "$SW/sessions/$S13D.join" ]'
-# A planted question with a bad code joins nothing.
-printf 'kfr;touch_pwned %s\n' "$(date +%s)" > "$SW/sessions/$S13D.join"
-run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
-check "a bad code in the question runs nothing" '[ ! -e "$HOMEDIR/projask3/touch_pwned" ] && ! grep -q "join kfr;" "$T/fake/calls"'
-# A planted time the shell cannot count (leading zero, too long, in the future) never joins or breaks.
-for t in 08 1234567890123456789012345 9999999999; do
-  printf 'kfr-gggg-0001 %s\n' "$t" > "$SW/sessions/$S13D.join"
-  run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join")"
-  check "a planted time $t: the hook still exits 0" '[ "$(cat "$T/rc")" = 0 ]'
-  not_called "a planted time $t joins nothing" "join kfr-gggg-0001"
-done
-# The question goes when the chat ends.
-run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "see ${LINK}kfr-gggg-0001 later")"
-check "a question is saved" '[ -f "$SW/sessions/$S13D.join" ]'
-run end "$(end "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "other")"
-check "and removed when the chat ends" '[ ! -e "$SW/sessions/$S13D.join" ]'
-# A chat already in a room is not asked: it gets the old answer (its next step is /fork).
-run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "see ${LINK}kfr-gggg-0001 later")"
-has "a chat in a room: paste it alone" "paste the invitation link on its own"
-check "and no question is saved" '[ ! -e "$SW/sessions/$SQ.join" ]'
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "a ${LINK}kfr-qqqq-0001 or ${LINK}kfr-gggg-0001")"
+has "two invitations: send one" "holds two different room invitations"
+not_called "and none joins" "join kfr-gggg-0001"
+# The same link twice is one invitation.
+run prompt "$(prompt "$S13D" "$(transcript "$S13D")" "$HOMEDIR/projask3" "join ${LINK}kfr-gggg-0001 (${LINK}kfr-gggg-0001)")"
+called "the same link twice joins" "join kfr-gggg-0001"
+# A chat already in a room: the link inside text gets the /fork answer, like a link alone.
+run prompt "$(prompt "$SQ" "$TXQ" "$HOMEDIR/projask" "also join ${LINK}kfr-gggg-0001 please")"
+has "a chat in a room: fork for the new room" "type /fork followed by the invitation"
 
 echo "== 13c. the joining name says whose agent this is (agent_names_say_whose)"
 mkdir -p "$HOMEDIR/projwho1" "$HOMEDIR/projwho2" "$HOMEDIR/projwho3" "$HOMEDIR/projwho4" "$T/gitbin"
@@ -1721,6 +1674,7 @@ has "question 1, word for word" "\"Your role here?\", options Dev, Designer, PM 
 has "question 2, word for word" "\"How should I work with the others?\", options"
 has "question 3, word for word" "\"Who decides?\", options \"The room's leader\" and \"Me (ask me first)\""
 has "Researcher and other words come through the box's own Other" "the box has its own, for Researcher or any other role"
+has "words sent with the link become the recommended answer" "make that answer the first option of that question, in their words, with \"(Recommended)\""
 has "never invents them" "Never invent or guess an answer"
 has "sends them with the listener, room and agent filled in" "sh ~/.snapwork/snapwork-hook.sh --brief --room $ROOM_BQ --agent $AG_BQ <<'BRIEF'"
 has "says how a pick becomes a line" "any other words are role: other: <their words>"
@@ -1740,6 +1694,7 @@ run_cx prompt "$(cx_prompt "$CBQ" "$CXBQ" "$PBR" "${LINK}kfr-brfr-0001")"
 ST_BR=$(state_of "$ROOM_BR")
 has "Codex says it joined" "you just joined the room \"Brief room R\""
 has "and asks the three questions in plain text, word for word" "1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others? (for example: take designs from Barrett's Claude, build, send the result to the leader) 3. Who decides? (The room's leader, Me (ask me first))"
+has "Codex uses words sent with the link unless they change them" "say that answer after the question as the one you will use unless they change it"
 has "never invents them" "Never invent or guess an answer"
 has "posts no block before they answer" "Post no snapwork block until they answer"
 has "answers in a block of three lines" "role: dev, designer, pm, reviewer, researcher, or other: <their few words>"
