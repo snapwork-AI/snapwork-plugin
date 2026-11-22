@@ -1679,11 +1679,24 @@ has "never invents them" "Never invent or guess an answer"
 has "sends them with the listener, room and agent filled in" "sh ~/.snapwork/snapwork-hook.sh --brief --room $ROOM_BQ --agent $AG_BQ <<'BRIEF'"
 has "says how a pick becomes a line" "any other words are role: other: <their words>"
 has "its hello names its part" "In your hello, say your role, how you work with the others and who decides."
+has "a bare app name may still be improved after the hello" "fits better than \"Claude\", change it once"
 lacks "no hello before the answers" "Snapwork will soon ask you to say hello"
 check "a Claude chat is not marked: its Stop never keeps the chat busy" '! grep -q briefNeeded "$ST_BQ"'
 reset_calls
 run stop "$(stop "$SBQ" "$TXBQ" "$PBQ")"
 called "so it waits for messages as before" "hook $ROOM_BQ"
+
+# A person's default name: Snapwork adds the role at the hello, so the agent keeps it.
+ROOM_BN=2a2a2a2a-0000-4000-8000-00000000001e
+echo "kfr-brfn-0001|$ROOM_BN|Brief room N" >> "$T/fake/spaces"
+mkdir -p "$HOMEDIR/projbn"
+SBN=2a2a2a2a-aaaa-4000-8000-00000000001e
+printf "Minh's Claude" > "$T/fake/join_name"
+run prompt "$(prompt "$SBN" "$(transcript "$SBN")" "$HOMEDIR/projbn" "${LINK}kfr-brfn-0001")"
+rm -f "$T/fake/join_name"
+has "a person's name: the role is added at the hello" "Snapwork adds the role your person gives to \"Minh's Claude\" (with the role CV builder: \"Minh's Claude CV Builder\")"
+has "and the agent keeps it" "Keep that name unless your person asks for another."
+lacks "with no nudge to rename" "fits better than"
 
 # Codex: the questions in plain text, the answers in a block that Snapwork keeps
 CBQ=01a171a2-56e9-7881-86fe-e9ca5071001d

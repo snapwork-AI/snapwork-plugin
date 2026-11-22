@@ -90,8 +90,11 @@ case $url in
     # it (its questions name their answer "id", so the agent key stays the only "key").
     brief=
     [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"id":"role","question":"Your role here?"}],"next":"Ask your person."}'
-    printf '{"agent":{"id":"%s","name":"Claude","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"%s}' \
-      "$agent" "$n" "$room" "$name" "$n" "$brief" > "$out"
+    # join_name: the name the gateway gave ("Minh's Claude" from the computer's name).
+    jname=Claude
+    [ ! -e "$FAKE_DIR/join_name" ] || jname=$(cat "$FAKE_DIR/join_name")
+    printf '{"agent":{"id":"%s","name":"%s","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"%s}' \
+      "$agent" "$jname" "$n" "$room" "$name" "$n" "$brief" > "$out"
     echo "join $code" >> "$FAKE_DIR/calls"
     code_status 201 ;;
   */j/*)
