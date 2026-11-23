@@ -215,6 +215,25 @@ codex_file_block() {
       codex_continued
       exit 2
       ;;
+    # Its person says it is not theirs (invitation_says_whose_agent): undo the link, stay in the room.
+    'not mine')
+      [ ! -s "$WORK/rest" ] || codex_not_posted not-mine-extra "a not mine block holds only the line not mine"
+      result=$(sh "$HOOK" --not-mine $(say_args) 2> /dev/null | head -n 1)
+      case $result in
+        done:*)
+          plog "codex-not-mine"
+          printf 'Snapwork: it is undone: Snapwork no longer counts you as anyone\047s agent, and you stay in the room. Tell the person in one line; post no block about it.\n' >&2
+          ;;
+        *)
+          plog "codex-not-mine-failed"
+          # The same block may come again (after no answer): the next answer sends it again.
+          (umask 077 && [ ! -L "$said" ] && printf '%s\n' "$turn" > "$said") 2> /dev/null
+          printf 'Snapwork: it was not undone (%s). Tell the person in one line.\n' "${result:-no answer}" >&2
+          ;;
+      esac
+      codex_continued
+      exit 2
+      ;;
   esac
   return 1
 }

@@ -49,6 +49,15 @@ Job Runner"), waits for your answers before Claude says hello, and its hello say
 shows the role on Claude's row, and you can change the answers there. Codex asks the same questions
 in its chat. An agent you add from My agents is not asked: you answer in Snapwork.
 
+**Your own agent, and your other rooms** (0.3.25). When you invite Claude or Codex with a link
+made "for my own agent", Snapwork counts it as yours at once, and it tells you so in its chat:
+"Snapwork now counts me as Minh's agent. If you're not Minh, say so and I'll undo it." Say so and
+it undoes it; it stays in the room. Claude can also post into another of your rooms when you ask it
+in its own chat: it lists your rooms, shows you the room and the text, and posts once you say yes.
+The message shows under your name, marked as sent by Claude. It never does this because a message
+in a room asked. Asked to make itself yours when it joined with another link, Claude gives you a
+link to open while signed in. Codex can undo but not yet post into other rooms.
+
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
 

@@ -24,6 +24,8 @@
 # brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them
 # (leads makes it the leader's join);
 # held_<room> makes the status say the hello still waits for them (held_for_brief).
+# belongs_to (its content: the person's first name, or empty for none) makes every join reply say
+# whose agent it now is; an undo is logged as "not-mine <room>", notminefail_<room> answers 403.
 set -u
 out=
 wfmt=
@@ -93,6 +95,18 @@ case $url in
     [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"id":"role","question":"Your role here?"}],"next":"Ask your person."}'
     # leads: this join made the agent the room's leader (became_leader).
     [ ! -e "$FAKE_DIR/leads" ] || brief="$brief"',"became_leader":true'
+    # belongs_to: a join with the person's own link (the gateway's tellLine, word for word).
+    if [ -e "$FAKE_DIR/belongs_to" ]; then
+      first=$(cat "$FAKE_DIR/belongs_to")
+      if [ -n "$first" ]; then
+        tell="Snapwork now counts me as $first's agent. If you're not $first, say so and I'll undo it."
+        first="\"$first\""
+      else
+        tell="Snapwork now counts me as the agent of the person who made my invitation link. If that's not you, say so and I'll undo it."
+        first=null
+      fi
+      brief="$brief"',"belongs_to":{"first_name":'"$first"',"tell":"'"$tell"'","undo":"If your person says you are not theirs, undo it: DELETE /rooms/x/belongs-to with your agent key. You stay in the room."}'
+    fi
     # join_name: the name the gateway gave ("Minh's Claude" from the computer's name).
     jname=Claude
     [ ! -e "$FAKE_DIR/join_name" ] || jname=$(cat "$FAKE_DIR/join_name")
@@ -140,6 +154,12 @@ case $url in
     [ ! -e "$FAKE_DIR/namefail_$r" ] || answer 409 '{"error":{"code":"CONFLICT","message":"That name is already used in this room; pick another"}}'
     new=$(sed -n 's/.*"name":"\([^"]*\)".*/\1/p' "$FAKE_DIR/renamed_$r")
     answer 200 "{\"agent\":{\"id\":\"a1\",\"name\":\"$new\"},\"previous\":\"Claude\",\"changed\":true}" ;;
+  */rooms/*/belongs-to)
+    r=$(room_of)
+    echo "not-mine $r" >> "$FAKE_DIR/calls"
+    gate
+    [ ! -e "$FAKE_DIR/notminefail_$r" ] || answer 403 '{"error":{"code":"FORBIDDEN","message":"Not now"}}'
+    answer 200 '{"belongs_to":null}' ;;
   */rooms/*/away)
     echo "away $(room_of)" >> "$FAKE_DIR/calls" ;;
   */rooms/*/listening/stop | */rooms/*/listening/start)
