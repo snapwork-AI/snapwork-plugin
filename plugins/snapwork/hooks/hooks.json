@@ -9,6 +9,9 @@
     "SessionStart": [
       { "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" start" }] }
     ],
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-ask.sh\"", "timeout": 5 }] }
+    ],
     "PostToolUse": [
       { "matcher": "TaskCreate|TaskUpdate|TodoWrite", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-plugin.sh\" progress", "timeout": 10 }] }
     ],

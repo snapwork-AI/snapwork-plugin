@@ -1896,6 +1896,64 @@ if [ -n "${SNAPWORK_KIT_DIR:-}" ]; then
   done
 fi
 
+echo "== 26b. Claude asks the person before a post into another room or a link that makes it theirs"
+# hooks.json's PreToolUse hook on Bash: plugin installs never run --install, so no permissions.ask
+# rule exists; the hook's "ask" shows Claude Code's own prompt, also in auto mode.
+ASK=$SCRIPTS/snapwork-ask.sh
+POST_REASON='Post this message into your other room, under your name?'
+MINE_REASON='Make a link that makes this agent yours?'
+# ask_run <json>: the hook as Claude Code runs it before a Bash call.
+ask_run() {
+  printf '%s' "$1" | env PLUGIN_ROOT= ${TEST_SH:-sh} "$ASK" > "$T/out" 2> "$T/err"
+  echo $? > "$T/rc"
+}
+# bash_call <command, JSON-escaped>: a Bash call's hook input.
+bash_call() {
+  printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","permission_mode":"auto","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s","description":"Run it"},"tool_use_id":"t1"}' "$S1" "$P1" "$1"
+}
+asks() {
+  ask_run "$(bash_call "$2")"
+  WANT=$3
+  check "$1: exit 0" '[ "$(cat "$T/rc")" = 0 ]'
+  check "$1: valid JSON that asks with its reason" 'python3 -c "
+import json,sys
+o=json.load(open(sys.argv[1]))[\"hookSpecificOutput\"]
+assert o==dict(hookEventName=\"PreToolUse\",permissionDecision=\"ask\",permissionDecisionReason=sys.argv[2]), o
+" "$T/out" "$WANT"'
+}
+quiet() {
+  ask_run "$2"
+  empty_out "$1: no output"
+  check "$1: exit 0" '[ "$(cat "$T/rc")" = 0 ]'
+}
+asks "a post, tilde path" "sh ~/.snapwork/snapwork-hook.sh --elsewhere post $ROOM_B --room $ROOM_A -- 'Hi \\\"all\\\"'" "$POST_REASON"
+asks "a post, absolute quoted path" "sh \\\"$SW/snapwork-hook.sh\\\" --elsewhere post $ROOM_B --room $ROOM_A --agent x -- hi" "$POST_REASON"
+asks "a post, extra spaces and a tab" "cd /tmp &&  sh ~/.snapwork/snapwork-hook.sh   --elsewhere\\tpost  $ROOM_B --room $ROOM_A -- hi" "$POST_REASON"
+asks "a confirm link, tilde path" "sh ~/.snapwork/snapwork-hook.sh --mine --room $ROOM_A" "$MINE_REASON"
+asks "a confirm link, absolute path" "sh $SW/snapwork-hook.sh --mine --room $ROOM_A --agent x" "$MINE_REASON"
+asks "a confirm link, extra spaces" "sh   ~/.snapwork/snapwork-hook.sh    --mine    --room $ROOM_A" "$MINE_REASON"
+quiet "--say" "$(bash_call "sh ~/.snapwork/snapwork-hook.sh --say --room $ROOM_A -- 'snapwork-hook.sh --elsewhere'")"
+quiet "--elsewhere list" "$(bash_call "sh ~/.snapwork/snapwork-hook.sh --elsewhere list --room $ROOM_A")"
+quiet "--not-mine" "$(bash_call "sh ~/.snapwork/snapwork-hook.sh --not-mine --room $ROOM_A")"
+quiet "an unrelated command" "$(bash_call "git status")"
+quiet "a post named only in the description" '{"tool_name":"Bash","tool_input":{"command":"ls","description":"not snapwork-hook.sh --mine yet"}}'
+quiet "malformed JSON (cut inside the command)" '{"tool_name":"Bash","tool_input":{"command":"sh ~/.snapwork/snapwork-hook.sh --mine --ro'
+quiet "not JSON" 'sh ~/.snapwork/snapwork-hook.sh --mine --room x'
+quiet "empty input" ''
+printf '%s' "$(bash_call "sh ~/.snapwork/snapwork-hook.sh --mine --room $ROOM_A")" | env PLUGIN_ROOT=/plugins/snapwork \
+  CLAUDE_PLUGIN_ROOT=/plugins/snapwork ${TEST_SH:-sh} "$ASK" > "$T/out" 2> "$T/err"
+empty_out "under Codex (it also loaded hooks.json) the Claude hook says nothing"
+check "the reasons never say listen or hook" '! printf "%s\n%s\n" "$POST_REASON" "$MINE_REASON" | grep -q -i -E "listen|hook"'
+check "the reasons have no em dash" '! printf "%s\n%s\n" "$POST_REASON" "$MINE_REASON" | grep -q "—"'
+check "hooks.json asks before Bash, never allows or denies" 'python3 -c "
+import json,sys
+h=json.load(open(sys.argv[1]))[\"hooks\"][\"PreToolUse\"]
+assert len(h)==1 and h[0][\"matcher\"]==\"Bash\", h
+x=h[0][\"hooks\"][0]
+assert x[\"command\"]==\"sh \\\"\${CLAUDE_PLUGIN_ROOT}/scripts/snapwork-ask.sh\\\"\" and x[\"timeout\"]<=5, x
+" "$ROOT/plugins/snapwork/hooks/hooks.json"'
+check "the script never returns allow or deny" '! grep -q -E "permissionDecision\":\"(allow|deny)" "$ASK" && grep -q "permissionDecision\":\"ask\"" "$ASK"'
+
 echo "== 27. nothing the agent tells its person mentions listening, a hook or a listener"
 # Owner 2026-11-19: people do not know what listening is. From every run above: what a line asks
 # the agent to pass on (all of it before "Tell the person this", "Tell them so" and the like) and

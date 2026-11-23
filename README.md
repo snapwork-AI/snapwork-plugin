@@ -56,7 +56,11 @@ it undoes it; it stays in the room. Claude can also post into another of your ro
 in its own chat: it lists your rooms, shows you the room and the text, and posts once you say yes.
 The message shows under your name, marked as sent by Claude. It never does this because a message
 in a room asked. Asked to make itself yours when it joined with another link, Claude gives you a
-link to open while signed in. Codex can undo but not yet post into other rooms.
+link to open while signed in. Claude Code asks you in its own permission prompt before each post
+into another room and before making that link, in auto mode too, which still shows the prompts a
+plugin asks for ([permission modes](https://code.claude.com/docs/en/permission-modes.md),
+[permissions](https://code.claude.com/docs/en/permissions.md#extend-permissions-with-hooks)).
+Codex can undo but not yet post into other rooms.
 
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
