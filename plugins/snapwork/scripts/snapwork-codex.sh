@@ -55,14 +55,24 @@ codex_steer_note() {
   printf 'Then tell them, in one more line: while this chat waits for messages from the room it shows as busy, so to write to you meanwhile they send their message and press Steer next to it. '
 }
 
-# The three questions at a join that needs them (brief_text): in plain text, answered in a block that
-# Snapwork keeps (codex_brief_block).
+# The questions at a join that needs them (brief_text): in plain text, answered in a block that
+# Snapwork keeps (codex_brief_block). How it works with the others is suggested from the role, and
+# the leader is never asked who decides (LEADS).
 codex_brief_text() {
-  printf 'Then ask them these three questions in plain text, word for word, and wait for their reply: 1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others? (for example: take designs from Barrett\047s Claude, build, send the result to the leader) 3. Who decides? (The room\047s leader, Me (ask me first)) '
-  printf 'If the message they sent with the invitation already answers a question (a role such as "as CV builder", or "I make the decisions"), say that answer after the question as the one you will use unless they change it, so they only need to answer the rest. '
+  printf 'Then ask them in plain text and wait for their reply. Their role shapes the next question: if the message they sent with the invitation names their role (such as "as CV builder"), say it as the role you will use unless they change it and ask the rest at once; otherwise ask question 1 alone first. '
+  printf '1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) '
+  if [ "$LEADS" -eq 1 ]; then
+    printf '2. How should I lead the room? (you lead it, as the first agent to join) '
+  else
+    printf '2. How should I work with the others? '
+  fi
+  printf 'For question 2, suggest two ways that fit their role, the better fit first as the one you will use unless they change it, each saying in a few concrete words what you will do in the room (for a job runner: take job requests from the room, run them and post the results). '
+  [ "$LEADS" -eq 1 ] || printf '3. Who decides? (The room\047s leader, Me (ask me first)) '
+  printf 'If that message answers another question too (such as "I make the decisions"), say that answer after the question as the one you will use unless they change it. '
   printf 'Never invent or guess an answer, and say nothing about how Snapwork works behind the scenes. Post no snapwork block until they answer. '
-  printf 'When they have answered, end that answer with a snapwork block of exactly three lines, which Snapwork keeps as their answers and does not post in the room: role: dev, designer, pm, reviewer, researcher, or other: <their few words>; then workflow: <their words>; then decides: leader (the room\047s leader) or person (they want to be asked first). '
-  printf 'If Snapwork says the answers were not sent, ask again for what it names. Snapwork then asks you to say hello within seconds: in your hello, say your role, how you work with the others and who decides. '
+  printf 'When they have answered, end that answer with a snapwork block of exactly three lines, which Snapwork keeps as their answers and does not post in the room: role: dev, designer, pm, reviewer, researcher, or other: <their few words>; then workflow: <the way they chose, in a few words>; then '
+  if [ "$LEADS" -eq 1 ]; then printf 'decides: leader (you lead the room). '; else printf 'decides: leader (the room\047s leader) or person (they want to be asked first). '; fi
+  printf 'If Snapwork says the answers were not sent, ask again for what it names. Snapwork then asks you to say hello within seconds: in your hello, say your role and how you work with the others%s. ' "$([ "$LEADS" -eq 1 ] || printf ' and who decides')"
 }
 
 # Codex's Desktop app also fires Stop for a hidden helper thread, about 3 s after the real one, with

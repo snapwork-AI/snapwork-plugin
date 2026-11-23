@@ -21,7 +21,8 @@
 # Agent progress: a PUT is logged as "progress <room>" (its body kept in progress_<room>), a DELETE
 # as "progress-stop <room>"; progress_slow makes a PUT take 2 s before it is logged.
 # The person's three answers (M5.12): logged as "brief <room>", the body kept in brief_<room>;
-# brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them;
+# brieffail_<room> answers 400 with what to fix; brief_needed makes every join reply ask for them
+# (leads makes it the leader's join);
 # held_<room> makes the status say the hello still waits for them (held_for_brief).
 set -u
 out=
@@ -90,6 +91,8 @@ case $url in
     # it (its questions name their answer "id", so the agent key stays the only "key").
     brief=
     [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"id":"role","question":"Your role here?"}],"next":"Ask your person."}'
+    # leads: this join made the agent the room's leader (became_leader).
+    [ ! -e "$FAKE_DIR/leads" ] || brief="$brief"',"became_leader":true'
     # join_name: the name the gateway gave ("Minh's Claude" from the computer's name).
     jname=Claude
     [ ! -e "$FAKE_DIR/join_name" ] || jname=$(cat "$FAKE_DIR/join_name")

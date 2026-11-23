@@ -1669,12 +1669,15 @@ ST_BQ=$(state_of "$ROOM_BQ")
 AG_BQ=$(sed -n 's/^  "agentId": "\(.*\)",$/\1/p' "$ST_BQ")
 check "the key is the agent's, not a question's" 'grep -q "\"key\": \"testkey" "$ST_BQ"'
 has "Claude says it joined" "you just joined the room \"Brief room Q\""
-has "then asks in one question box" "ask them three questions in one question box (AskUserQuestion"
+has "then asks in the question box" "ask them in the question box (AskUserQuestion"
+has "the role first when the link came without one" "otherwise ask question 1 alone first, then the rest in a second box"
 has "question 1, word for word" "\"Your role here?\", options Dev, Designer, PM and Reviewer"
-has "question 2, word for word" "\"How should I work with the others?\", options"
+has "question 2, word for word" "\"How should I work with the others?\""
+has "its options written from the role" "Write its options for their role: two ways an agent in that role works with the others"
 has "question 3, word for word" "\"Who decides?\", options \"The room's leader\" and \"Me (ask me first)\""
 has "Researcher and other words come through the box's own Other" "the box has its own, for Researcher or any other role"
-has "words sent with the link become the recommended answer" "make that answer the first option of that question, in their words, with \"(Recommended)\""
+has "a role sent with the link becomes the recommended answer" "with that role as the first option of question 1, in their words, with \"(Recommended)\""
+has "and so do other words sent with it" "make that answer the first option of that question, in their words, with \"(Recommended)\""
 has "never invents them" "Never invent or guess an answer"
 has "sends them with the listener, room and agent filled in" "sh ~/.snapwork/snapwork-hook.sh --brief --room $ROOM_BQ --agent $AG_BQ <<'BRIEF'"
 has "says how a pick becomes a line" "any other words are role: other: <their words>"
@@ -1694,9 +1697,33 @@ SBN=2a2a2a2a-aaaa-4000-8000-00000000001e
 printf "Minh's Claude" > "$T/fake/join_name"
 run prompt "$(prompt "$SBN" "$(transcript "$SBN")" "$HOMEDIR/projbn" "${LINK}kfr-brfn-0001")"
 rm -f "$T/fake/join_name"
-has "a person's name: the role is added at the hello" "Snapwork adds the role your person gives to \"Minh's Claude\" (with the role CV builder: \"Minh's Claude CV Builder\")"
+has "a person's name: the role is added once the answers are sent" "As soon as their answers are sent, Snapwork adds their role to your name (with the role CV builder: \"Minh's Claude CV Builder\")"
+has "and the agent tells them the new name, not the joining one" "say so instead of naming \"Minh's Claude\", and once the answers are sent tell them the new name in one line"
 has "and the agent keeps it" "Keep that name unless your person asks for another."
 lacks "with no nudge to rename" "fits better than"
+
+# A numbered default name: the role replaces the number, so the example drops it.
+ROOM_B2=2c2c2c2c-0000-4000-8000-000000000020
+echo "kfr-brf2-0001|$ROOM_B2|Brief room 2" >> "$T/fake/spaces"
+mkdir -p "$HOMEDIR/projb2"
+printf "Minh's Claude 2" > "$T/fake/join_name"
+run prompt "$(prompt "2c2c2c2c-aaaa-4000-8000-000000000020" "$(transcript "2c2c2c2c-aaaa-4000-8000-000000000020")" "$HOMEDIR/projb2" "${LINK}kfr-brf2-0001")"
+rm -f "$T/fake/join_name"
+has "a numbered name: the role is added to the name without its number" "Snapwork adds their role to your name (with the role CV builder: \"Minh's Claude CV Builder\"); when you tell them you joined, say so instead of naming \"Minh's Claude 2\""
+
+# The leader's join: it leads whatever its role, so it is asked how it leads, never who decides.
+ROOM_BL=2b2b2b2b-0000-4000-8000-00000000001f
+echo "kfr-brfl-0001|$ROOM_BL|Brief room L" >> "$T/fake/spaces"
+mkdir -p "$HOMEDIR/projbl"
+SBL=2b2b2b2b-aaaa-4000-8000-00000000001f
+touch "$T/fake/leads"
+run prompt "$(prompt "$SBL" "$(transcript "$SBL")" "$HOMEDIR/projbl" "${LINK}kfr-brfl-0001")"
+rm -f "$T/fake/leads"
+has "the leader is asked how it leads" "\"How should I lead the room?\""
+lacks "never how to work with the leader" "\"How should I work with the others?\""
+lacks "never who decides" "\"Who decides?\""
+has "and sends that it decides" "decides: leader (you lead the room)."
+has "its hello says how it leads" "In your hello, say your role and how you lead the room."
 
 # Codex: the questions in plain text, the answers in a block that Snapwork keeps
 CBQ=01a171a2-56e9-7881-86fe-e9ca5071001d
@@ -1706,12 +1733,14 @@ reset_calls
 run_cx prompt "$(cx_prompt "$CBQ" "$CXBQ" "$PBR" "${LINK}kfr-brfr-0001")"
 ST_BR=$(state_of "$ROOM_BR")
 has "Codex says it joined" "you just joined the room \"Brief room R\""
-has "and asks the three questions in plain text, word for word" "1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others? (for example: take designs from Barrett's Claude, build, send the result to the leader) 3. Who decides? (The room's leader, Me (ask me first))"
+has "and asks the questions in plain text, the role first when unknown" "otherwise ask question 1 alone first. 1. Your role here? (Dev, Designer, PM, Reviewer, Researcher, Other (a few words)) 2. How should I work with the others?"
+has "with ways to work suggested from the role" "For question 2, suggest two ways that fit their role"
+has "and who decides" "3. Who decides? (The room's leader, Me (ask me first))"
 has "Codex uses words sent with the link unless they change them" "say that answer after the question as the one you will use unless they change it"
 has "never invents them" "Never invent or guess an answer"
 has "posts no block before they answer" "Post no snapwork block until they answer"
 has "answers in a block of three lines" "role: dev, designer, pm, reviewer, researcher, or other: <their few words>"
-has "its hello names its part" "in your hello, say your role, how you work with the others and who decides"
+has "its hello names its part" "in your hello, say your role and how you work with the others and who decides"
 lacks "no hello before the answers" "Snapwork will soon ask you to say hello"
 check "the chat is marked until the answers are sent" 'grep -q "\"briefNeeded\": \"1\"" "$ST_BR"'
 touch "$T/fake/held_$ROOM_BR"

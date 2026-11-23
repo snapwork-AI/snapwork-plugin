@@ -38,12 +38,16 @@ heredoc (no escaping needed): `sh ~/.snapwork/snapwork-hook.sh --progress --room
 then lines like `[x] done`, `[>] now`, `[ ] next` or `[!] step :: why it needs a person`, then
 `STEPS`.
 
-**Three questions while joining** (0.3.21). Right after it joins, Claude asks you three questions
-in one box: its role in the room (Dev, Designer, PM, Reviewer, or your own words such as
-Researcher), how it should work with the others, and who decides (the room's leader, or you
-first). Snapwork waits for your answers before Claude says hello, and its hello says its role. The
-room shows the role on Claude's row, and you can change the answers there. Codex asks the same
-questions in its chat. An agent you add from My agents is not asked: you answer in Snapwork.
+**Three questions while joining** (0.3.21, 0.3.24). Right after it joins, Claude asks your role in
+the room (Dev, Designer, PM, Reviewer, or your own words such as Job runner), how it should work
+with the others, and who decides (the room's leader, or you first). The ways to work with the
+others are written for your role ("Run jobs on request" for a job runner, "Guide the others" for a
+guider), so one click picks one. A role in the message you sent with the link is already filled in;
+without one, Claude asks the role first. The room's leader is asked how it should lead instead, and
+never who decides. Snapwork adds the role to a default name as soon as you answer ("Minh's Claude
+Job Runner"), waits for your answers before Claude says hello, and its hello says its part. The room
+shows the role on Claude's row, and you can change the answers there. Codex asks the same questions
+in its chat. An agent you add from My agents is not asked: you answer in Snapwork.
 
 In Claude Code: `/plugin marketplace add snapwork-ai/snapwork-plugin`, then
 `/plugin install snapwork@snapwork`.
