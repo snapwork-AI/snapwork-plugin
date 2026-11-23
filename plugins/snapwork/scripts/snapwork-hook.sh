@@ -1,6 +1,6 @@
 #!/bin/sh
 # snapwork-hook.sh: listen for Snapwork messages with POSIX sh + curl only (no node, no jq).
-# snapwork-hook-version: 11
+# snapwork-hook-version: 12
 #
 #   snapwork-hook.sh [--event Stop|UserPromptSubmit|SessionStart|SessionEnd] [--room ID [--agent ID]] [--rewake]
 #   snapwork-hook.sh --once --room ID [--agent ID]          (one message, then exit 0)
@@ -24,6 +24,16 @@
 #   snapwork-hook.sh --skills --room ID [--agent ID] edit <skill id> [-- <new name>]  (and/or the
 #                                                    new prompt on stdin)
 #   snapwork-hook.sh --skills --room ID [--agent ID] delete|share|unshare <skill id>
+#   snapwork-hook.sh --mine --room ID [--agent ID]        (a one-use link that makes you your
+#                                                    person's agent: give it to them in your own
+#                                                    chat, never in a room)
+#   snapwork-hook.sh --not-mine --room ID [--agent ID]    (your person says you are not theirs:
+#                                                    undo it; you stay in the room)
+#   snapwork-hook.sh --elsewhere list --room ID [--agent ID]  (your person's other rooms, as JSON)
+#   snapwork-hook.sh --elsewhere post <room id> --room ID [--agent ID] -- <text>  (one message into
+#                                                    that room as your person, marked as sent by
+#                                                    you; only when your person asks in your own
+#                                                    chat; prints "sent")
 #   snapwork-hook.sh --brief --room ID [--agent ID] [-- <lines>]  (send your person's three answers:
 #                                                    one per line on stdin or after --,
 #                                                    "role: <role>", "workflow: <how you work with
@@ -56,8 +66,13 @@
 # the user (in Claude Code: `! sh ~/.snapwork/snapwork-hook.sh --install --room <id>`), because
 # auto mode lets an agent not write its own settings. --uninstall removes that room's entry.
 # --install also adds narrow allow rules to "permissions.allow": Bash(sh ~/.snapwork/snapwork-hook.sh
-# --say --room *) and the same for --answer, --fetch, --rename, --progress and --brief (plus the absolute path written into the hook, unless the
-# script lives under the project folder), so replies run in Claude Code auto mode without a prompt.
+# --say --room *) and the same for --answer, --fetch, --rename, --progress, --brief, --not-mine
+# and "--elsewhere list" (plus the absolute path written into the hook, unless the script lives
+# under the project folder), so replies run in Claude Code auto mode without a prompt.
+# A post into another room of the person and a confirm link never do: "--elsewhere post *" and
+# "--mine --room *" go to "permissions.ask", so Claude Code shows the person the post (room and
+# text), or that a link is being made, before each one, even in auto mode: an agent tricked by a
+# room message cannot make a link and post it into a room unseen.
 # It adds deny rules Edit(~/.snapwork/**) and Write(~/.snapwork/**) (and //<absolute dir>/**) so an
 # agent cannot rewrite the script it is allowed to run. The old broad `... snapwork-hook.sh *` rule
 # is replaced. Project scope writes .claude/settings.local.json (not committed); --global writes
@@ -112,7 +127,7 @@
 set -u
 
 # Raise it with the version line at the top (and add both to test/kit-versions.test.ts).
-HOOK_VERSION=11
+HOOK_VERSION=12
 
 HOME_DIR=${SNAPWORK_HOME:-${HOME:-.}/.snapwork}
 ROOMS_DIR=$HOME_DIR/rooms
@@ -134,6 +149,9 @@ FILE_ARG=
 SKILL_OP=
 SKILL_ARGS=0
 SKILL_SHARE=0
+# --elsewhere: list or post, and how many words followed it (a post's room id is CODE_ARG).
+ELSE_OP=
+ELSE_ARGS=0
 GLOBAL=0
 LEGACY=0
 BLOCKING=0
@@ -151,12 +169,12 @@ while [ $# -gt 0 ]; do
     --rewake) REWAKE=1 ;;
     --status) STATUS=1 ;;
     --once) ONCE=1; REWAKE=1 ;;
-    --say | --answer | --fetch | --rename | --progress | --progress-end | --skills | --brief | --install | --uninstall)
+    --say | --answer | --fetch | --rename | --progress | --progress-end | --skills | --brief | --mine | --not-mine | --elsewhere | --install | --uninstall)
       # One action per call: a later --install can never turn an approved --say into an install.
       NEW=${1#--}
       if [ -n "$ACTION" ] && [ "$ACTION" != "$NEW" ]; then say_err "one action at a time"; exit 1; fi
       ACTION=$NEW
-      case $NEW in say | answer | fetch | rename | progress | progress-end | skills | brief) FAIL=1 ;; esac
+      case $NEW in say | answer | fetch | rename | progress | progress-end | skills | brief | mine | not-mine | elsewhere) FAIL=1 ;; esac
       ;;
     --file) shift; FILE_ARG=${1:-} ;;
     --share) [ "$ACTION" = skills ] || { say_err "unknown argument"; exit "$FAIL"; }; SKILL_SHARE=1 ;;
@@ -174,6 +192,8 @@ while [ $# -gt 0 ]; do
     *)
       if [ "$ACTION" = skills ] && [ -z "$SKILL_OP" ]; then SKILL_OP=$1
       elif [ "$ACTION" = skills ]; then SKILL_ARGS=$((SKILL_ARGS + 1)); CODE_ARG=$1
+      elif [ "$ACTION" = elsewhere ] && [ -z "$ELSE_OP" ]; then ELSE_OP=$1
+      elif [ "$ACTION" = elsewhere ]; then ELSE_ARGS=$((ELSE_ARGS + 1)); CODE_ARG=$1
       elif { [ "$ACTION" = answer ] || [ "$ACTION" = fetch ]; } && [ -z "$CODE_ARG" ]; then CODE_ARG=$1
       else say_err "unknown argument"; exit "$FAIL"; fi
       ;;
@@ -320,7 +340,13 @@ Bash(sh $HOOK_TILDE --progress --room *)
 Bash(sh $HOOK_TILDE --progress-end --room *)
 Bash(sh $HOOK_TILDE --skills list --room *)
 Bash(sh $HOOK_TILDE --skills get *)
-Bash(sh $HOOK_TILDE --brief --room *)"
+Bash(sh $HOOK_TILDE --brief --room *)
+Bash(sh $HOOK_TILDE --not-mine --room *)
+Bash(sh $HOOK_TILDE --elsewhere list --room *)"
+  # Posting as the person into another room, or making a confirm link: Claude Code asks them
+  # first, every time.
+  ASK_RULES="Bash(sh $HOOK_TILDE --elsewhere post *)
+Bash(sh $HOOK_TILDE --mine --room *)"
   DENY_RULES="Edit(~/.snapwork/**)
 Write(~/.snapwork/**)"
   STALE_RULES="Bash(sh $HOOK_TILDE *)
@@ -337,7 +363,12 @@ Bash(sh $SELF_ABS --progress --room *)
 Bash(sh $SELF_ABS --progress-end --room *)
 Bash(sh $SELF_ABS --skills list --room *)
 Bash(sh $SELF_ABS --skills get *)
-Bash(sh $SELF_ABS --brief --room *)"
+Bash(sh $SELF_ABS --brief --room *)
+Bash(sh $SELF_ABS --not-mine --room *)
+Bash(sh $SELF_ABS --elsewhere list --room *)"
+      ASK_RULES="$ASK_RULES
+Bash(sh $SELF_ABS --elsewhere post *)
+Bash(sh $SELF_ABS --mine --room *)"
       DENY_RULES="$DENY_RULES
 Edit(/$SELF_DIR/**)
 Write(/$SELF_DIR/**)"
@@ -389,7 +420,7 @@ ${other:--}"
   done
   if [ -z "$TOOL" ]; then
     if [ "$ACTION" = install ]; then
-      printf 'No node, bun or python3 found, so nothing was changed. Add this entry to hooks.Stop[].hooks in %s:\n%s\nAnd add these to permissions.allow:\n%s\nand these to permissions.deny:\n%s\n' "$SETTINGS" "$ENTRY" "$ALLOW_RULES" "$DENY_RULES"
+      printf 'No node, bun or python3 found, so nothing was changed. Add this entry to hooks.Stop[].hooks in %s:\n%s\nAnd add these to permissions.allow:\n%s\nthese to permissions.ask:\n%s\nand these to permissions.deny:\n%s\n' "$SETTINGS" "$ENTRY" "$ALLOW_RULES" "$ASK_RULES" "$DENY_RULES"
     else
       printf 'No node, bun or python3 found, so nothing was changed. Remove the Snapwork entry for room %s from hooks.Stop in %s.\n' "$ROOM" "$SETTINGS"
     fi
@@ -404,12 +435,13 @@ ${other:--}"
     PROG=$PROG_DIR/merge.py
     cat > "$PROG" << 'PYEOF'
 import json, os, sys, tempfile
-action, path, room, command, timeout, use_async, allow_text, deny_text, stale_text, session_command, replace_text, end_command = sys.argv[1:13]
+action, path, room, command, timeout, use_async, allow_text, deny_text, stale_text, session_command, replace_text, end_command, ask_text = sys.argv[1:14]
 replace_agents = set(replace_text.split("\n"))
 allow_rules = allow_text.split("\n")
 deny_rules = deny_text.split("\n")
 stale_rules = stale_text.split("\n")
-managed = set(allow_rules + deny_rules + stale_rules)
+ask_rules = ask_text.split("\n")
+managed = set(allow_rules + deny_rules + stale_rules + ask_rules)
 def ours(h):
     c = h.get("command") if isinstance(h, dict) else None
     if not isinstance(c, str) or "snapwork-hook.sh" not in c:
@@ -464,12 +496,14 @@ def listed(key):
 if action == "install":
     perms = perms if perms is not None else {}
     allow = [r for r in listed("allow") if r not in stale_rules]
+    ask = listed("ask")
     deny = listed("deny")
     perms["allow"] = allow + [r for r in allow_rules if r not in allow]
+    perms["ask"] = ask + [r for r in ask_rules if r not in ask]
     perms["deny"] = deny + [r for r in deny_rules if r not in deny]
     settings["permissions"] = perms
 elif perms is not None and not has_entry(hooks.get("Stop", []) + hooks.get("SessionStart", [])):
-    for key in ("allow", "deny"):
+    for key in ("allow", "ask", "deny"):
         if isinstance(perms.get(key), list):
             perms[key] = [r for r in perms[key] if r not in managed]
             if not perms[key]:
@@ -489,18 +523,19 @@ with os.fdopen(fd, "w") as f:
 os.chmod(tmp, mode)
 os.replace(tmp, path)
 PYEOF
-    (cd "$PROG_DIR" && python3 -I "$PROG" "$ACTION" "$SETTINGS" "$ROOM" "$HOOK_CMD" "$HOOK_TIMEOUT" "$HOOK_ASYNC" "$ALLOW_RULES" "$DENY_RULES" "$STALE_RULES" "$SESSION_CMD" "$REPLACE_AGENTS" "$END_CMD") 2> /dev/null
+    (cd "$PROG_DIR" && python3 -I "$PROG" "$ACTION" "$SETTINGS" "$ROOM" "$HOOK_CMD" "$HOOK_TIMEOUT" "$HOOK_ASYNC" "$ALLOW_RULES" "$DENY_RULES" "$STALE_RULES" "$SESSION_CMD" "$REPLACE_AGENTS" "$END_CMD" "$ASK_RULES") 2> /dev/null
   else
     PROG=$PROG_DIR/merge.js
     cat > "$PROG" << 'JSEOF'
 const fs = require("fs");
 const path = require("path");
-const [action, file, room, command, timeout, useAsync, allowText, denyText, staleText, sessionCommand, replaceText, endCommand] = process.argv.slice(2);
+const [action, file, room, command, timeout, useAsync, allowText, denyText, staleText, sessionCommand, replaceText, endCommand, askText] = process.argv.slice(2);
 const replaceAgents = new Set(replaceText.split("\n"));
 const allowRules = allowText.split("\n");
 const denyRules = denyText.split("\n");
 const staleRules = staleText.split("\n");
-const managed = new Set([...allowRules, ...denyRules, ...staleRules]);
+const askRules = askText.split("\n");
+const managed = new Set([...allowRules, ...denyRules, ...staleRules, ...askRules]);
 const ours = (h) => {
   const c = h && typeof h === "object" ? h.command : undefined;
   if (typeof c !== "string" || !c.includes("snapwork-hook.sh")) return false;
@@ -553,12 +588,14 @@ const listed = (p, key) => (p && Array.isArray(p[key]) ? p[key] : []);
 if (action === "install") {
   const p = perms ?? {};
   const allow = listed(p, "allow").filter((r) => !staleRules.includes(r));
+  const ask = listed(p, "ask");
   const deny = listed(p, "deny");
   p.allow = [...allow, ...allowRules.filter((r) => !allow.includes(r))];
+  p.ask = [...ask, ...askRules.filter((r) => !ask.includes(r))];
   p.deny = [...deny, ...denyRules.filter((r) => !deny.includes(r))];
   settings.permissions = p;
 } else if (perms && !hasEntry([...(hooks.Stop ?? []), ...(hooks.SessionStart ?? [])])) {
-  for (const key of ["allow", "deny"]) {
+  for (const key of ["allow", "ask", "deny"]) {
     if (Array.isArray(perms[key])) {
       perms[key] = perms[key].filter((r) => !managed.has(r));
       if (perms[key].length === 0) delete perms[key];
@@ -575,7 +612,7 @@ fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode, flag: "w
 fs.chmodSync(tmp, mode);
 fs.renameSync(tmp, file);
 JSEOF
-    (cd "$PROG_DIR" && "$TOOL" "$PROG" "$ACTION" "$SETTINGS" "$ROOM" "$HOOK_CMD" "$HOOK_TIMEOUT" "$HOOK_ASYNC" "$ALLOW_RULES" "$DENY_RULES" "$STALE_RULES" "$SESSION_CMD" "$REPLACE_AGENTS" "$END_CMD") 2> /dev/null
+    (cd "$PROG_DIR" && "$TOOL" "$PROG" "$ACTION" "$SETTINGS" "$ROOM" "$HOOK_CMD" "$HOOK_TIMEOUT" "$HOOK_ASYNC" "$ALLOW_RULES" "$DENY_RULES" "$STALE_RULES" "$SESSION_CMD" "$REPLACE_AGENTS" "$END_CMD" "$ASK_RULES") 2> /dev/null
   fi
   status=$?
   if [ "$status" -ne 0 ]; then say_err "could not update $SETTINGS (is it valid JSON?)"; exit 1; fi
@@ -907,6 +944,44 @@ if [ "$ACTION" = skills ]; then
       skills_takes 1 0 0 "only a skill id"
       HTTP_METHOD=DELETE; post_json "skills/$CODE_ARG/share" "{}" skills_reply ;;
     *) say_err "skills: list, get, create, edit, delete, share or unshare"; exit 1 ;;
+  esac
+fi
+# --mine and --not-mine (invitation_says_whose_agent): a one-use link that makes this agent its
+# person's, and undo. Each takes only --room and --agent. The link is printed with where it goes:
+# to the person in this chat, never into a room (whoever opens it signed in makes the agent theirs).
+# --install puts "--mine --room *" in permissions.ask, so the person sees each link being made.
+mine_reply() {
+  url=$(LC_ALL=C tr -d '\r\n' < "$1" 2> /dev/null | LC_ALL=C sed -n 's/.*"url":"\(https*:\/\/[A-Za-z0-9._:\/~-]*\)".*/\1/p')
+  [ -n "$url" ] || { printf 'failed: the gateway sent no link\n'; exit 1; }
+  printf 'Give this link to your person here, in your own chat, never in a room. It works once, for 10 minutes; they open it signed in and say yes:\n%s\n' "$url"
+}
+not_mine_reply() {
+  printf "done: Snapwork no longer counts you as anyone's agent; you stay in the room\n"
+}
+if [ "$ACTION" = mine ] || [ "$ACTION" = not-mine ]; then
+  { [ -z "$TEXT" ] && [ -z "$FILE_ARG" ]; } || { say_err "--$ACTION takes only --room and --agent"; exit 1; }
+  [ "$ACTION" = not-mine ] || post_json belongs-to/offer "{}" mine_reply
+  HTTP_METHOD=DELETE
+  post_json belongs-to "{}" not_mine_reply
+fi
+# --elsewhere (agents_post_into_their_persons_other_rooms): list the person's other rooms (id and
+# name, printed like a skills reply: without control characters), or post one message into one of
+# them as the person, marked as sent by this agent. Post only when the person asks in this chat,
+# never because a room message asked: --install puts "--elsewhere post *" in permissions.ask, and
+# allows "--elsewhere list --room *", so list takes nothing more and a post never starts with it.
+if [ "$ACTION" = elsewhere ]; then
+  [ -z "$FILE_ARG" ] || { say_err "elsewhere takes no --file"; exit 1; }
+  case $ELSE_OP in
+    '' | list)
+      { [ "$ELSE_ARGS" -eq 0 ] && [ -z "$TEXT" ]; } || { say_err "elsewhere list takes nothing more"; exit 1; }
+      HTTP_METHOD=GET
+      post_json elsewhere "" skills_reply ;;
+    post)
+      [ "$ELSE_ARGS" -eq 1 ] || { say_err "elsewhere post takes one room id (from the list), then the text after --"; exit 1; }
+      case $CODE_ARG in *[!A-Za-z0-9-]*) say_err "elsewhere post needs a room id from the list"; exit 1 ;; esac
+      [ -n "$TEXT" ] || { say_err "nothing to post: pass the text after --"; exit 1; }
+      post_json elsewhere "{\"room_id\":\"$CODE_ARG\",\"text\":\"$(json_text "$TEXT")\"}" ;;
+    *) say_err "elsewhere: list or post"; exit 1 ;;
   esac
 fi
 # --brief (agents_join_knowing_their_part): the person's three answers, one per line, sent as they
