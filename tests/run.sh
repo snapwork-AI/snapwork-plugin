@@ -1854,7 +1854,7 @@ has "it lists them" "sh ~/.snapwork/snapwork-hook.sh --elsewhere list --room $RO
 has "and posts with" "post with: sh ~/.snapwork/snapwork-hook.sh --elsewhere post <room id> --room $ROOM_OX --agent $AG_OX -- '<text>'"
 has "at once after the person's command naming the room" "It goes at once when they typed /snapwork:send-to-room naming that room."
 has "otherwise it asks once, in the quoted shape" \
-  "Otherwise Snapwork stops it and you ask them once in this chat, in one line: Post \"<the text>\" in '<room name>'? Reply yes to send it. Once they reply yes, run the same command again, unchanged."
+  "Otherwise Snapwork stops it and you ask them once in this chat, in one line: Post \"<the text>\" in '<room name>'? Reply \"yes\" to send it. Once they reply yes, run the same command again, unchanged."
 has "and makes itself theirs with a link for them" \
   "When they ask to make you their agent, sh ~/.snapwork/snapwork-hook.sh --mine --room $ROOM_OX --agent $AG_OX prints a link"
 run start "$(start "$SOX" "$(transcript "$SOX")" "$PO" resume)"
@@ -1876,7 +1876,7 @@ lacks "Codex runs no command to undo" "--not-mine"
 lacks "Codex runs no command to post into other rooms" "--elsewhere"
 has "Codex posts into other rooms with a to: block" "end your final answer with a snapwork block whose first line is to: <the room's name>"
 has "at once after the person's skill naming the room, else it asks once" \
-  "It goes at once when they typed \$snapwork:send-to-room naming that room. Otherwise Snapwork holds it and you ask them once, in one line: Post \"<the text>\" in '<room name>'? Reply yes to send it."
+  "It goes at once when they typed \$snapwork:send-to-room naming that room. Otherwise Snapwork holds it and you ask them once, in one line: Post \"<the text>\" in '<room name>'? Reply \"yes\" to send it."
 lacks "nor a confirm link" "--mine"
 touch "$T/fake/notminefail_$ROOM_OC"
 reset_calls
@@ -1909,7 +1909,7 @@ echo "== 26b. Claude asks before a post into another room or a link that makes i
 ASK=$SCRIPTS/snapwork-ask.sh
 POST_REASON='Post this message into your other room, under your name?'
 MINE_REASON='Make a link that makes this agent yours?'
-ASK_SHAPE="Post \"<the text>\" in '<room name>'? Reply yes to send it."
+ASK_SHAPE="Post \"<the text>\" in '<room name>'? Reply \"yes\" to send it."
 # ask_run <json>: the hook as Claude Code runs it before a Bash call.
 ask_run() {
   printf '%s' "$1" | env PLUGIN_ROOT= HOME="$HOMEDIR" SNAPWORK_HOME="$SW" ${TEST_SH:-sh} "$ASK" > "$T/out" 2> "$T/err"
@@ -2067,7 +2067,7 @@ ask_run "$(bash_call "$POST_E3" "$SST")"
 decided "it allows the same command" allow
 ask_run "$(bash_call "$POST_E3" "$SST")"
 decided "once" deny "$ASK_SHAPE"
-for word in y yep yeah ok Okay sure "send it" "Post it." "YES."; do
+for word in y yep yeah ok Okay sure "send it" "Post it." "YES." "'yes'" '\"yes\"' "'Yes'." '`yes`'; do
   run prompt "$(prompt "$SST" "$TXST" "$PST" "$word")"
   has "\"$word\" is a yes" "your person said yes"
   ask_run "$(bash_call "$POST_E3" "$SST")"
@@ -2131,7 +2131,7 @@ reset_calls
 run_cx stop "$(cx_stop "$CST" "$CXST" "$PST" turn-s2 '"```snapwork\nto: ops\nHello Ops,\nall good.\n```"')"
 not_called "without a grant nothing is posted" "elsewhere-post $ROOM_CT"
 err_has "the agent asks once, in the quoted shape, with the room named" \
-  "Ask them in one line, in exactly this shape: Post \"<the text>\" in 'Ops'? Reply yes to send it. Then end your turn with no snapwork block"
+  "Ask them in one line, in exactly this shape: Post \"<the text>\" in 'Ops'? Reply \"yes\" to send it. Then end your turn with no snapwork block"
 check "the post is held" 'sed -n 1p "$G_CT.pending" | grep -q -x "held $ROOM_E3 [0-9]*" && [ "$(sed -n 2p "$G_CT.pending")" = Ops ]'
 reset_calls
 run_cx prompt "$(cx_prompt "$CST" "$CXST" "$PST" "yes")"

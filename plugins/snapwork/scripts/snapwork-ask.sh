@@ -62,4 +62,4 @@ if grant_take "$CHAT" room "$TARGET" || grant_take "$CHAT" cmd "$SHA"; then
   decide allow 'Your person asked for this post in this chat.'
 fi
 printf 'cmd %s %s\n' "$SHA" "$(grant_until)" | grant_put "$CHAT" pending || decide ask "$ASK_POST"
-decide deny "Not posted: your person has not said yes to this post. Ask them in one line, in exactly this shape, with your text and the room's name from the list: Post \\\"<the text>\\\" in '<room name>'? Reply yes to send it. Then end your turn. Once they reply yes, run the same command again, unchanged."
+decide deny "Not posted: your person has not said yes to this post. Ask them in one line, in exactly this shape, with your text and the room's name from the list: Post \\\"<the text>\\\" in '<room name>'? Reply \\\"yes\\\" to send it. Then end your turn. Once they reply yes, run the same command again, unchanged."

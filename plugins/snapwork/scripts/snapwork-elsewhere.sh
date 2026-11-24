@@ -20,7 +20,7 @@
 # CMD_TAIL, plog, say_args, pick, try_adopt, work_dir, api, API_STATUS, API_BODY, body_has,
 # api_reason, codex_continued, grant_until, grant_put, grant_fresh, grant_take, is_yes.
 
-ELSEWHERE_ASK="Post \"<the text>\" in '<room name>'? Reply yes to send it."
+ELSEWHERE_ASK="Post \"<the text>\" in '<room name>'? Reply \"yes\" to send it."
 
 elsewhere_text() {
   if [ "$APP" = codex ]; then
@@ -216,7 +216,7 @@ codex_to_block() {
     { printf 'held %s %s\n%s\n' "$id" "$(grant_until)" "$name"; LC_ALL=C tr -d '\r\n' < "$WORK/rest"; printf '\n'; } | grant_put "$SID" pending \
       || codex_to_refused to-hold "Snapwork could not keep it while asking your person"
     plog "codex-elsewhere-held"
-    printf 'Snapwork: your message for "%s" is not posted yet: your person did not type %s naming that room. Ask them in one line, in exactly this shape: Post "<the text>" in \047%s\047? Reply yes to send it. Then end your turn with no snapwork block: when they reply yes, Snapwork posts it.\n' "$name" "$CMD_SEND" "$name" >&2
+    printf 'Snapwork: your message for "%s" is not posted yet: your person did not type %s naming that room. Ask them in one line, in exactly this shape: Post "<the text>" in \047%s\047? Reply "yes" to send it. Then end your turn with no snapwork block: when they reply yes, Snapwork posts it.\n' "$name" "$CMD_SEND" "$name" >&2
   fi
   codex_continued
   exit 2

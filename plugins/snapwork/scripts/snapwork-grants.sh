@@ -59,9 +59,11 @@ grant_take() {
   rm -f "$GRANT_FILE.$$.used"
 }
 
-# is_yes <text, JSON-escaped>: the person's whole message says yes.
+# is_yes <text, JSON-escaped>: the person's whole message says yes. The ask shows it as "yes", so
+# quotes around it (' " `, a JSON-escaped " included) count as the same yes.
 is_yes() {
-  yes_word=$(printf '%s' "$1" | sed 's/\\[nrt]/ /g' | tr 'A-Z' 'a-z' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[!.]$//')
+  yes_word=$(printf '%s' "$1" | sed 's/\\[nrt]/ /g; s/\\"//g' | tr -d "'\"\`" | tr 'A-Z' 'a-z' \
+    | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[!.]$//')
   case $yes_word in yes | y | yep | yeah | ok | okay | sure | 'send it' | 'post it') return 0 ;; esac
   return 1
 }

@@ -65,8 +65,8 @@ message in a room asked.
   `/snapwork:send-to-room Design review the plan we agreed`. You typed it yourself, so it posts there
   once without asking you again. The name can be in quotes, and any case works.
 - Ask in your own words instead ("post this summary in Design review"), and your agent asks you once
-  in its chat: `Post "<the text>" in 'Design review'? Reply yes to send it.` It posts only after you
-  reply yes (or y, ok, sure, send it). Anything else you write drops it.
+  in its chat: `Post "<the text>" in 'Design review'? Reply "yes" to send it.` It posts only after you
+  reply "yes" (or y, ok, sure, send it, with or without the quotes). Anything else you write drops it.
 
 Each say-so is for one post, in that chat, for 10 minutes. It does not stop an agent that sets out
 to get around it: Claude Code can write files with its own tools, and the room's key could be used
