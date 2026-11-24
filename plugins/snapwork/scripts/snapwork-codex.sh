@@ -20,6 +20,8 @@
 #
 # A block whose first line is "role: ..." is the person's three answers to the questions asked at
 # the join, not a message: Snapwork keeps it and nothing is posted (codex_brief_block).
+# A block whose first line is "to: <room name>" goes to another of the person's rooms, with their
+# say-so (codex_to_block, snapwork-elsewhere.sh).
 #
 # Uses from snapwork-plugin.sh / snapwork-onoff.sh / snapwork-share.sh: INPUT, SID, SESSIONS,
 # STATE, ROOM, WORK, work_dir, input_field, valid_session, field, set_line, space_of, plog, api,

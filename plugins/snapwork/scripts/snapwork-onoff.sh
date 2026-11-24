@@ -1,6 +1,6 @@
 # snapwork-onoff.sh: sourced by snapwork-plugin.sh (not run by itself). Turning this chat's
-# member off and on (/snapwork:exit-space, /snapwork:join-space; in Codex the skills $snapwork:exit-space,
-# $snapwork:join-space) and noticing when Snapwork no
+# member off and on (/snapwork:exit-room, /snapwork:join-room; in Codex the skills $snapwork:exit-room,
+# $snapwork:join-room) and noticing when Snapwork no
 # longer accepts its key (removed, refused, or the space is gone).
 #
 # Uses from snapwork-plugin.sh: GATEWAY, ROOMS, ROOM, AGENT, STATE, API_SECONDS, field, set_line,
@@ -116,7 +116,7 @@ gone() {
 # A refusal from the listening gate (403) names the agent's state; "refused" is final.
 gate_refused() { [ "$(body_word state)" = refused ]; }
 
-# /snapwork:exit-space in a chat that is in a space. CMD_JOIN is spliced into printf formats here:
+# /snapwork:exit-room in a chat that is in a space. CMD_JOIN is spliced into printf formats here:
 # it is one of two fixed words set in snapwork-plugin.sh, never anything a person or message chose.
 exit_space() {
   space=$(space_of "$STATE")
@@ -198,7 +198,7 @@ unreachable_on() {
   exit 0
 }
 
-# /snapwork:join-space (no invitation) in a chat that is in a space: turn it back on if it is off
+# /snapwork:join-room (no invitation) in a chat that is in a space: turn it back on if it is off
 # (here, or at Snapwork, for example by the email's stop link), otherwise say how it stands.
 join_space_status() {
   is_off && turn_on

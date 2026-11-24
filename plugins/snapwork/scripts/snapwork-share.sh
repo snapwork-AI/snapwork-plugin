@@ -1,6 +1,6 @@
-# snapwork-share.sh: sourced by snapwork-plugin.sh (not run by itself). Sending to the space:
-# /snapwork:send-to-space, the listener scripts kept current in ~/.snapwork, and, in Codex, the
-# file lines of the ```snapwork block (M6.2).
+# snapwork-share.sh: sourced by snapwork-plugin.sh (not run by itself). Sending to the room:
+# /snapwork:send-to-room (into another of the person's rooms: snapwork-elsewhere.sh), the listener
+# scripts kept current in ~/.snapwork, and, in Codex, the file lines of the ```snapwork block (M6.2).
 #
 # ~/.snapwork/snapwork-hook.sh and snapwork-files.sh are the paths every Snapwork text names. Each
 # carries a "# snapwork-<name>-version: N" line; this plugin puts its own copies there when one is
@@ -20,6 +20,9 @@
 #   ```snapwork            changes this chat's name in the room (after its hello) and continues
 #   name: Backend          the chat with the outcome
 #   ```
+#   ```snapwork            posts the rest into the person's other room of that name, or holds it
+#   to: Design review      until they say yes (snapwork-elsewhere.sh)
+#   ```
 # Both go through snapwork-files.sh with the chat's key on stdin; the path must be plain (letters,
 # digits, spaces and ._/()+,=@~-) and the file id the gateway's shape. The same folder rules apply.
 #
@@ -27,10 +30,11 @@
 # AGENT, GATEWAY, CWD, WORK, APP, field, plog, pick, try_adopt, is_off, made_by_setup, say_args,
 # space_of, agent_of, codex_block_rules, codex_not_posted, codex_continued.
 
-# /snapwork:send-to-space [what]: a shortcut for "send this to the space". The agent works out from
-# the conversation what to send (only doing work first when asked) and writes the message itself;
-# this only says where and how.
-send_to_space() {
+# /snapwork:send-to-room [room name] [what]: a shortcut for "send this to the room". The agent works
+# out from the conversation what to send (only doing work first when asked) and writes the message
+# itself; this only says where and how. A text that starts with the name of another of the person's
+# rooms sends there (send_elsewhere_if_named).
+send_to_room() {
   if pick bound || try_adopt; then
     if is_off; then
       plog "send-off"
@@ -44,6 +48,7 @@ send_to_space() {
   fi
   plog "send-asked"
   refresh_kit
+  send_elsewhere_if_named
   printf 'Snapwork: the person wants something sent to the room "%s", as "%s". What they wrote after the command says what, often by pointing at this conversation ("this", "what we found", "your answer"); with nothing after it, send what you just told them. Work out what they mean, do any work they asked for first, then write one message for the people and agents in the room, not your working notes. ' \
     "$(space_of "$STATE")" "$(agent_of "$STATE")"
   if [ "$APP" = codex ] && ! made_by_setup "$STATE"; then
@@ -53,6 +58,7 @@ send_to_space() {
     printf 'To send a file (when they say "send this file" or name one), add --file \047<path inside this folder>\047 right before --, and the text becomes its note; a file over 50 MB uploads in the background. It prints the file id (sent <name> as file <id>): give that id to whoever should fetch it. ' 
   fi
   kit_stale_note
+  elsewhere_note
   printf 'If you cannot tell what to send, ask the person instead of posting. Once posted, tell them in one line.\n'
   exit 0
 }
@@ -155,8 +161,8 @@ codex_split() {
     }' "$1"
 }
 
-# In Codex: a block whose first line is "attach: <path>", or that is only "fetch: <file id>" or
-# "name: <new name>".
+# In Codex: a block whose first line is "attach: <path>" or "to: <room name>", or that is only
+# "fetch: <file id>" or "name: <new name>".
 # Returns 1 when it is an ordinary message. $1 is the block, still JSON-escaped.
 codex_file_block() {
   codex_split "$1"
@@ -215,6 +221,7 @@ codex_file_block() {
       codex_continued
       exit 2
       ;;
+    'to:'*) codex_to_block ;;
     # Its person says it is not theirs (invitation_says_whose_agent): undo the link, stay in the room.
     'not mine')
       [ ! -s "$WORK/rest" ] || codex_not_posted not-mine-extra "a not mine block holds only the line not mine"

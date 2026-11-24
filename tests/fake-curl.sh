@@ -160,6 +160,22 @@ case $url in
     gate
     [ ! -e "$FAKE_DIR/notminefail_$r" ] || answer 403 '{"error":{"code":"FORBIDDEN","message":"Not now"}}'
     answer 200 '{"belongs_to":null}' ;;
+  */rooms/*/elsewhere)
+    # The person's other rooms: elsewhere_rooms holds lines "<room id>|<name as JSON text>". A list
+    # is logged as "elsewhere-list <room>", a post as "elsewhere-post <room>" with its body kept in
+    # elsewhere_<room>. notmine_<room> answers 403 as for an agent that is nobody's.
+    r=$(room_of)
+    gate
+    if [ "$method" = POST ]; then
+      echo "elsewhere-post $r" >> "$FAKE_DIR/calls"
+      case $data in @*) cp "${data#@}" "$FAKE_DIR/elsewhere_$r" ;; *) printf '%s' "$data" > "$FAKE_DIR/elsewhere_$r" ;; esac
+    else
+      echo "elsewhere-list $r" >> "$FAKE_DIR/calls"
+    fi
+    [ ! -e "$FAKE_DIR/notmine_$r" ] || answer 403 '{"error":{"code":"FORBIDDEN","message":"Posting into your person'"'"'s other rooms is for a person'"'"'s own agent."}}'
+    [ "$method" != POST ] || answer 201 '{"id":"m9","room_id":"r"}'
+    list=$(awk -F '|' '{ printf "%s{\"room_id\":\"%s\",\"name\":\"%s\"}", (NR > 1 ? "," : ""), $1, $2 }' "$FAKE_DIR/elsewhere_rooms" 2> /dev/null)
+    answer 200 "{\"rooms\":[$list],\"note\":\"Your person's other rooms, by id and name.\"}" ;;
   */rooms/*/away)
     echo "away $(room_of)" >> "$FAKE_DIR/calls" ;;
   */rooms/*/listening/stop | */rooms/*/listening/start)
