@@ -69,7 +69,7 @@ HERE=$(cd "$(dirname "$0")" 2> /dev/null && pwd) || exit 0
 HOOK=$HERE/snapwork-hook.sh
 # This plugin's version (the same as in both plugin.json files and the marketplace). The listener
 # names it to Snapwork on every poll, so the room shows who runs an old plugin.
-PLUGIN_VERSION=0.3.27
+PLUGIN_VERSION=0.3.28
 SNAPWORK_PLUGIN_VERSION=$PLUGIN_VERSION
 export SNAPWORK_PLUGIN_VERSION
 SNAPWORK_HOME=${SNAPWORK_HOME:-${HOME:-}/.snapwork}
@@ -419,7 +419,7 @@ hello_text() {
 # person's answers are in, so the agent asks them, sends them, and its hello names its part. How it
 # works with the others matters most, so its options are written from the role (owner 2026-11-23:
 # "job runner" runs the jobs asked for, a "job guider" guides the others); the leader leads, so it is
-# never asked who decides (LEADS, the join reply's became_leader). The question box takes 2-4
+# never asked who decides (LEADS, a room with no leader yet in the join reply). The question box takes 2-4
 # options and adds its own Other.
 brief_text() {
   if [ "$APP" = codex ]; then codex_brief_text; return 0; fi
@@ -530,7 +530,8 @@ fail() {
 # ---- joining ----
 # 1 when the join reply says the person's three answers are still to come (brief_needed).
 BRIEF_NEEDED=0
-# 1 when the join made this agent the room's leader (became_leader): it is never asked who decides.
+# 1 when the room had no leader at the join (the agent leads once its hello passes): it is never
+# asked who decides.
 LEADS=0
 # The join reply's belongs_to.tell (a join by the person's own link), else empty.
 TELL=
@@ -641,7 +642,9 @@ join() {
   # Snapwork waits for the person's three answers before the hello (absent when they were given in
   # the console). Its questions are not read: the agent is told them in brief_text.
   ! grep -q '"brief_needed"' "$reply" || BRIEF_NEEDED=1
-  ! grep -q '"became_leader":true' "$reply" || LEADS=1
+  # A room with no leader yet: this agent leads once its hello passes (the first to pass leads, so
+  # the join reply's became_leader is always false for a joining agent, which starts pending).
+  ! grep -o '"room":{[^}]*}' "$reply" | head -n 1 | grep -q '"leader":null' || LEADS=1
   TELL=$(grep -o '"belongs_to":{[^}]*}' "$reply" | head -n 1 | grep -o '"tell":"[^"]*"' \
     | sed 's/^"tell":"//;s/"$//' | LC_ALL=C tr -d '\000-\037\177\\')
   STATE=$ROOMS/$ROOM.$AGENT.json

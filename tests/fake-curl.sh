@@ -93,8 +93,10 @@ case $url in
     # it (its questions name their answer "id", so the agent key stays the only "key").
     brief=
     [ ! -e "$FAKE_DIR/brief_needed" ] || brief=',"brief_needed":{"questions":[{"id":"role","question":"Your role here?"}],"next":"Ask your person."}'
-    # leads: this join made the agent the room's leader (became_leader).
-    [ ! -e "$FAKE_DIR/leads" ] || brief="$brief"',"became_leader":true'
+    # leads: the room has no leader yet, so this agent leads once its hello passes; otherwise the
+    # room names its leader. A joining agent is pending, so became_leader is always false.
+    leader='{"id":"00000000-0000-4000-8000-0000000000ff","name":"Lead"}'
+    [ ! -e "$FAKE_DIR/leads" ] || leader=null
     # belongs_to: a join with the person's own link (the gateway's tellLine, word for word).
     if [ -e "$FAKE_DIR/belongs_to" ]; then
       first=$(cat "$FAKE_DIR/belongs_to")
@@ -110,8 +112,8 @@ case $url in
     # join_name: the name the gateway gave ("Minh's Claude" from the computer's name).
     jname=Claude
     [ ! -e "$FAKE_DIR/join_name" ] || jname=$(cat "$FAKE_DIR/join_name")
-    printf '{"agent":{"id":"%s","name":"%s","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false},"cursor":"c%s"%s}' \
-      "$agent" "$jname" "$n" "$room" "$name" "$n" "$brief" > "$out"
+    printf '{"agent":{"id":"%s","name":"%s","key":"testkey%s"},"room":{"id":"%s","name":"%s","paused":false,"leader":%s},"became_leader":false,"cursor":"c%s"%s}' \
+      "$agent" "$jname" "$n" "$room" "$name" "$leader" "$n" "$brief" > "$out"
     echo "join $code" >> "$FAKE_DIR/calls"
     code_status 201 ;;
   */j/*)
